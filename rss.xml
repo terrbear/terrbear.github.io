@@ -1,0 +1,658 @@
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title><![CDATA[terrbear dot org]]></title><description><![CDATA[Probably at fault]]></description><link>https://terrbear.org</link><generator>GatsbyJS</generator><lastBuildDate>Sun, 26 Apr 2020 22:57:26 GMT</lastBuildDate><item><title><![CDATA[AWS IoT EC2 Power Button]]></title><description><![CDATA[I recently bought a Pixelbook, 
+which is great for lots of things, but not coding. I knew this at purchase time, however, 
+so I just planned…]]></description><link>https://terrbear.org/iot-power-button/</link><guid isPermaLink="false">https://terrbear.org/iot-power-button/</guid><pubDate>Sun, 26 Aug 2018 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;I recently bought a &lt;a href=&quot;https://store.google.com/us/product/google_pixelbook&quot;&gt;Pixelbook&lt;/a&gt;,
+which is great for lots of things, but not coding. I knew this at purchase time, however,
+so I just planned on SSH’ing wherever I wanted to work.&lt;/p&gt;
+&lt;p&gt;Most of my home projects live on a personal EC2 instance I’ve set up.
+It lives in an autoscale group whose size is usually 0, so I’m not paying for
+the machine when I’m not using it.&lt;/p&gt;
+&lt;p&gt;One nit with this setup, however, was that I had to sign into the AWS console to turn on the machine, so
+I took my no-longer-used IoT button (&lt;a href=&quot;http://terrbear.org/scala/iot/ios/lazy/2016/05/23/amazon-iot-button.html&quot;&gt;see here&lt;/a&gt;)
+and plumbed it such that it behaves like a power button for my EC2 instance.&lt;/p&gt;
+&lt;p&gt;I’ve set all of this up at a &lt;a href=&quot;https://github.com/terrbear/boxomatic&quot;&gt;GitHub repo&lt;/a&gt; so you can copy it and do the same.&lt;/p&gt;
+&lt;p&gt;First, the high level workflow:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Push IoT Button&lt;/li&gt;
+&lt;li&gt;Trigger &lt;a href=&quot;https://aws.amazon.com/lambda/&quot;&gt;Lambda&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;Set ASG desired size to (ASG size == 0 ? 1 : 0)&lt;/li&gt;
+&lt;li&gt;Bootstrap from &lt;a href=&quot;https://www.ansible.com/&quot;&gt;Ansible&lt;/a&gt;&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h2&gt;AWS Setup&lt;/h2&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Note: You can achieve something similar with a single EC2 instance and suspend
+it between uses. That said, I’m suspicious of any EC2 host that’s been running
+around for more than a month, so I prefer having a brand new host each time.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;The first step to getting this working is to pick an EC2 instance in a launch
+config and create an autoscale group around it. This setup expects an &lt;a href=&quot;https://www.ubuntu.com/&quot;&gt;Ubuntu&lt;/a&gt;
+instance. If you go with something else, you’ll need to tweak a lot more to
+fit your needs.&lt;/p&gt;
+&lt;p&gt;The instance will need permissions to access an S3 bucket where you’re keeping
+the Ansible config (explained below).&lt;/p&gt;
+&lt;p&gt;I’m not going to go into VPC setup here, but you want to use a VPC subnet that
+has public internet access, and be sure to grant the instance a public IP. If
+you don’t do that, you’ll be unable to access your instance directly.&lt;/p&gt;
+&lt;p&gt;Here’s the first part where things get fun, the user data for the launch config
+(available under Advanced Details):&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;bash&quot;&gt;&lt;pre class=&quot;language-bash&quot;&gt;&lt;code class=&quot;language-bash&quot;&gt;&lt;span class=&quot;token shebang important&quot;&gt;#!/bin/bash -xev&lt;/span&gt;
+
+&lt;span class=&quot;token function&quot;&gt;apt-get&lt;/span&gt; update
+&lt;span class=&quot;token function&quot;&gt;apt-get&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;install&lt;/span&gt; -y python-pip python-dev libffi-dev libssl-dev
+
+pip &lt;span class=&quot;token function&quot;&gt;install&lt;/span&gt; s3cmd
+pip &lt;span class=&quot;token function&quot;&gt;install&lt;/span&gt; markupsafe
+
+&lt;span class=&quot;token function&quot;&gt;mkdir&lt;/span&gt; /root/ansible
+
+s3cmd get --recursive s3://YOUR-BUCKET /root/ansible
+pip &lt;span class=&quot;token function&quot;&gt;install&lt;/span&gt; ansible
+pip &lt;span class=&quot;token function&quot;&gt;install&lt;/span&gt; setuptools --upgrade
+
+&lt;span class=&quot;token function&quot;&gt;sleep&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;30&lt;/span&gt;
+
+&lt;span class=&quot;token builtin class-name&quot;&gt;cd&lt;/span&gt; /root/ansible &lt;span class=&quot;token operator&quot;&gt;&amp;amp;&amp;amp;&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;rm&lt;/span&gt; ansible.cfg &lt;span class=&quot;token operator&quot;&gt;&amp;amp;&amp;amp;&lt;/span&gt; ansible-galaxy &lt;span class=&quot;token function&quot;&gt;install&lt;/span&gt; -r deps.txt &lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt; /bootstrap.out
+
+&lt;span class=&quot;token function&quot;&gt;sleep&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;10&lt;/span&gt;
+
+&lt;span class=&quot;token builtin class-name&quot;&gt;cd&lt;/span&gt; /root/ansible &lt;span class=&quot;token operator&quot;&gt;&amp;amp;&amp;amp;&lt;/span&gt; ansible-playbook -i production -c &lt;span class=&quot;token builtin class-name&quot;&gt;local&lt;/span&gt; box.yml &lt;span class=&quot;token operator&quot;&gt;&gt;&gt;&lt;/span&gt; /bootstrap.out&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The user data is responsible for installing the bare minimum and grabbing things
+from S3. There are some seemingly arbitrary sleeps in there because occasionally
+I’ve had the s3cmd still finishing up but Ansible starts running anyway - ¯\&lt;em&gt;(ツ)&lt;/em&gt;/¯&lt;/p&gt;
+&lt;p&gt;&lt;span
+      class=&quot;gatsby-resp-image-wrapper&quot;
+      style=&quot;position: relative; display: block; margin-left: auto; margin-right: auto;  max-width: 590px;&quot;
+    &gt;
+      &lt;a
+    class=&quot;gatsby-resp-image-link&quot;
+    href=&quot;/static/fb87d73926fd7cdfbeef0c584b74819d/40a97/advanced-details.png&quot;
+    style=&quot;display: block&quot;
+    target=&quot;_blank&quot;
+    rel=&quot;noopener&quot;
+  &gt;
+    &lt;span
+    class=&quot;gatsby-resp-image-background-image&quot;
+    style=&quot;padding-bottom: 41.21621621621622%; position: relative; bottom: 0; left: 0; background-image: url(&apos;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAICAIAAAB2/0i6AAAACXBIWXMAAAsSAAALEgHS3X78AAAAxklEQVQY03WRWw6DIBRE3f+GuoCuoH/91K9qBKGggC/sCcTEGHqS3hDDzNyhlfdea62Umud5T6zruizLdoGPR4mKX4yRaYxpmiaEwKzrGjsppRCi73vc/4ozJHOJ2GEYuq4bx5GlpgSO+U6OKYgzbIhF27aI0TjnQoIDLtQpiLE0CZKttRyY0wlGNsHh2r+6ZsYEJVk7t2XmtySTC7zdtseCmExK8rZEqYQ+YWf0t8J3Md2K/8qyH84Hqb7Pt3685EcYoxXFfnwu0cr1ulxiAAAAAElFTkSuQmCC&apos;); background-size: cover; display: block;&quot;
+  &gt;&lt;/span&gt;
+  &lt;img
+        class=&quot;gatsby-resp-image-image&quot;
+        alt=&quot;Advanced Details&quot;
+        title=&quot;Advanced Details&quot;
+        src=&quot;/static/fb87d73926fd7cdfbeef0c584b74819d/fcda8/advanced-details.png&quot;
+        srcset=&quot;/static/fb87d73926fd7cdfbeef0c584b74819d/12f09/advanced-details.png 148w,
+/static/fb87d73926fd7cdfbeef0c584b74819d/e4a3f/advanced-details.png 295w,
+/static/fb87d73926fd7cdfbeef0c584b74819d/fcda8/advanced-details.png 590w,
+/static/fb87d73926fd7cdfbeef0c584b74819d/efc66/advanced-details.png 885w,
+/static/fb87d73926fd7cdfbeef0c584b74819d/c83ae/advanced-details.png 1180w,
+/static/fb87d73926fd7cdfbeef0c584b74819d/40a97/advanced-details.png 1911w&quot;
+        sizes=&quot;(max-width: 590px) 100vw, 590px&quot;
+        style=&quot;width:100%;height:100%;margin:0;vertical-align:middle;position:absolute;top:0;left:0;&quot;
+        loading=&quot;lazy&quot;
+      /&gt;
+  &lt;/a&gt;
+    &lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;Don’t attach any extra storage to the instance at this point - the default
+ephemeral storage works fine for what we’re doing.&lt;/p&gt;
+&lt;p&gt;You’ll want to allow TCP access over port 22 to your IP. If you don’t care,
+you can use 0.0.0.0/0 for your source, though I’d suggest just doing a quick
+&lt;code class=&quot;language-text&quot;&gt;curl ifconfig.co&lt;/code&gt; and using that instead.&lt;/p&gt;
+&lt;p&gt;Go create an autoscale group using the launch config you just created, and
+keep it isolated to a single availability zone. It doesn’t matter which,
+but needs to be just one.&lt;/p&gt;
+&lt;p&gt;Then, create an EBS volume in the same availability zone as your autoscale group.
+This will be where your home directory and your code will live. Keep in mind that
+you will pay for EBS capacity even if you’re not using it.&lt;/p&gt;
+&lt;p&gt;Lastly, you’ll want to create an AWS account with API access that can:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Create Route53 records in whatever zone you want your DNS entry to be&lt;/li&gt;
+&lt;li&gt;Attach EBS volumes to EC2 instances&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h2&gt;Bootstrapping With Ansible&lt;/h2&gt;
+&lt;p&gt;In an effort to be cheap/simple, I’ve avoided better tools like &lt;a href=&quot;https://aws.amazon.com/opsworks/&quot;&gt;OpsWorks&lt;/a&gt;
+or &lt;a href=&quot;https://www.ansible.com/products/tower&quot;&gt;Ansible Tower&lt;/a&gt; and gone with simply
+hosting Ansible in S3.&lt;/p&gt;
+&lt;p&gt;The host boots up, pulls from S3 all the ansible provisioning info, runs it,
+and then I can SSH in happily.&lt;/p&gt;
+&lt;p&gt;I have more things that happen in my own repository, but the basic necessities are:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;vim&lt;/li&gt;
+&lt;li&gt;set a Route53 entry so I don’t have to find the IP&lt;/li&gt;
+&lt;li&gt;attach and mount an EBS volume so my workspace persists&lt;/li&gt;
+&lt;li&gt;install a few things that I figure everyone wants&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;You’ll need to walk through the git repo and replace a few things for this to
+work for you (eg, your AWS keys will need to be in the playbook). This is described
+in the &lt;a href=&quot;https://github.com/terrbear/boxomatic/blob/master/README.markdown&quot;&gt;README&lt;/a&gt; in the git repo.&lt;/p&gt;
+&lt;p&gt;&lt;em&gt;Be sure to publish your Ansible files before proceeding!&lt;/em&gt;&lt;/p&gt;
+&lt;p&gt;The EC2 instance needs to be able to pull the Ansible data from S3, and then
+Ansible needs to be able to create records in Route53 and attach EBS volumes.&lt;/p&gt;
+&lt;p&gt;I didn’t figure out how to get the AWS Ansible calls to rely just on the native
+IAM role, so I have a separate account with AWS API credentials that can handle
+the EBS and Route53 tasks (described above).&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Note: There’s a Vagrantfile in the ansible/ directory in the git repo that
+allows for faster testing of Ansible changes than waiting on AWS to boot
+an instance each time.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;Once your host is up, you can verify it worked by checking out &lt;code class=&quot;language-text&quot;&gt;/bootstrap.out&lt;/code&gt;, eg:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;text&quot;&gt;&lt;pre class=&quot;language-text&quot;&gt;&lt;code class=&quot;language-text&quot;&gt;- downloading role &amp;#39;nodejs&amp;#39;, owned by geerlingguy
+- downloading role from https://github.com/geerlingguy/ansible-role-nodejs/archive/4.2.0.tar.gz
+- extracting geerlingguy.nodejs to /root/.ansible/roles/geerlingguy.nodejs
+- geerlingguy.nodejs (4.2.0) was installed successfully
+
+PLAY [box] ***************************************************************
+
+TASK [Gathering Facts] *********************************************************
+ok: [127.0.0.1]
+
+TASK [common : apt get update] *************************************************
+changed: [127.0.0.1]
+
+TASK [common : install useful stuff] *******************************************
+changed: [127.0.0.1] =&amp;gt; (item=[u&amp;#39;ntp&amp;#39;, u&amp;#39;vim&amp;#39;, u&amp;#39;openjdk-8-jdk-headless&amp;#39;, u&amp;#39;ruby&amp;#39;, u&amp;#39;ruby-dev&amp;#39;, u&amp;#39;ruby-all-dev&amp;#39;, u&amp;#39;ruby-bundler&amp;#39;, u&amp;#39;postgresql&amp;#39;, u&amp;#39;libpq-dev&amp;#39;, u&amp;#39;pkg-config&amp;#39;, u&amp;#39;ruby-pkg-config&amp;#39;, u&amp;#39;libmagickwand-dev&amp;#39;, u&amp;#39;imagemagick&amp;#39;, u&amp;#39;libssl-dev&amp;#39;, u&amp;#39;libffi-dev&amp;#39;, u&amp;#39;dstat&amp;#39;, u&amp;#39;htop&amp;#39;, u&amp;#39;direnv&amp;#39;, u&amp;#39;python-psycopg2&amp;#39;, u&amp;#39;awscli&amp;#39;, u&amp;#39;jq&amp;#39;])
+
+TASK [aws : boto] **************************************************************
+changed: [127.0.0.1]
+
+TASK [ebs : who am i] **********************************************************
+ok: [127.0.0.1]
+
+TASK [ebs : ebs vol] ***********************************************************
+changed: [127.0.0.1]
+
+TASK [ebs : name me] ***********************************************************
+changed: [127.0.0.1]
+
+&amp;lt;snip&amp;gt;
+
+PLAY RECAP *********************************************************************
+127.0.0.1                  : ok=23   changed=18   unreachable=0    failed=0   &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2&gt;Boxomatic: The Lambda&lt;/h2&gt;
+&lt;p&gt;This gets triggered when the button is pushed and is responsible for adjusting the autoscale
+group size. The code itself is pretty short:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;js&quot;&gt;&lt;pre class=&quot;language-js&quot;&gt;&lt;code class=&quot;language-js&quot;&gt;&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; &lt;span class=&quot;token constant&quot;&gt;AWS&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;require&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;aws-sdk&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; Promise &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;require&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;bluebird&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; autoscaling &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;token class-name&quot;&gt;AWS&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;AutoScaling&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; &lt;span class=&quot;token constant&quot;&gt;ASG_NAME&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; process&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;env&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token constant&quot;&gt;ASG_NAME&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;checkCapacity&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+  &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; params &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+    AutoScalingGroupNames&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;token constant&quot;&gt;ASG_NAME&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+  &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; autoscaling&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;describeAutoScalingGroups&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;params&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;promise&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;then&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token parameter&quot;&gt;data&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+      console&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;log&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;data back: &quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; data&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+      &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; asg &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; data&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;AutoScalingGroups&lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;token number&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+      &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; asg&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;Instances&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;length &lt;span class=&quot;token operator&quot;&gt;+&lt;/span&gt; asg&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;DesiredCapacity&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;handler&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token parameter&quot;&gt;event&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; context&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; callback&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+  &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; params &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+    AutoScalingGroupName&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token constant&quot;&gt;ASG_NAME&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; 
+    DesiredCapacity&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;1&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; 
+    HonorCooldown&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token boolean&quot;&gt;true&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+  &lt;span class=&quot;token function&quot;&gt;checkCapacity&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;then&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token parameter&quot;&gt;size&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;token keyword&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;size &lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+      params&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;DesiredCapacity &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+
+    autoscaling&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;setDesiredCapacity&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;params&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;function&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token parameter&quot;&gt;err&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; data&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+      &lt;span class=&quot;token keyword&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;err&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+        console&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;log&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;err&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; err&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;stack&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt; 
+        &lt;span class=&quot;token function&quot;&gt;callback&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;err&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; err&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+      &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;else&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;token function&quot;&gt;callback&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token keyword&quot;&gt;null&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;gotime&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+      &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+
+exports&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;handler &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; handler&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;blockquote&gt;
+&lt;p&gt;Note: When creating this Lambda in your account, it’s easiest to
+create a lambda named ‘boxomatic’ that is javascript and blank, and then
+run the deploy.sh script. Otherwise, just npm i and zip it and upload it.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;You’ll need to give the lambda permission to read and modify autoscaling groups.
+I just used the stock &lt;code class=&quot;language-text&quot;&gt;arn:aws:iam::aws:policy/AutoScalingFullAccess&lt;/code&gt; policy.&lt;/p&gt;
+&lt;p&gt;When creating the Lambda, be sure to set the environment variable &lt;code class=&quot;language-text&quot;&gt;ASG_NAME&lt;/code&gt; to
+whatever you named your autoscale group.&lt;/p&gt;
+&lt;p&gt;Now push the button and watch everything come to life!&lt;/p&gt;
+&lt;h2&gt;Cost&lt;/h2&gt;
+&lt;p&gt;Even when I get ambitious and turn on the machine on days I don’t use it, my costs
+have yet to exceed $40 in a month. I use this mostly on weekends. Here’s my bill
+for August as of 28Aug08:&lt;/p&gt;
+&lt;p&gt;&lt;span
+      class=&quot;gatsby-resp-image-wrapper&quot;
+      style=&quot;position: relative; display: block; margin-left: auto; margin-right: auto;  max-width: 590px;&quot;
+    &gt;
+      &lt;a
+    class=&quot;gatsby-resp-image-link&quot;
+    href=&quot;/static/133c78179497aa49636ae9131b80eead/58bb7/cost.png&quot;
+    style=&quot;display: block&quot;
+    target=&quot;_blank&quot;
+    rel=&quot;noopener&quot;
+  &gt;
+    &lt;span
+    class=&quot;gatsby-resp-image-background-image&quot;
+    style=&quot;padding-bottom: 58.10810810810811%; position: relative; bottom: 0; left: 0; background-image: url(&apos;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAMCAIAAADtbgqsAAAACXBIWXMAAAsSAAALEgHS3X78AAABcElEQVQoz42SO0/CUBSA+yf9Aw4mbsa4O6iTiYuJo4MxoiaKhoCbBHQzBqG2lGpbLAW0LfRBoZT7qKdFtPIwfsPpfeQ7595zy5TL5VoMz/OCIECEMcdxsiybpqknMAxDVVU5pt1uI4QYlmXHMpjValWIPhzPVSRJfmtoakNrJlAURRRFSZIgF8aYcafouY439Aa473nYh4ltO47rRNi23YuBmmEMEyahFELQFez82uHJ1W7RcH00WZ4DQycQQmBuWfVKemkgXVtO/+C+tXEpklilCX7k7xEhGGL6bq9QOkIk1LRGGOLNnFJ4saLdedWn5dTtdun15qOlZ7I55Hv7xWaWM/4h0+jYz0p+63ynM4hWnrTe8jFveqNF12bodL/I2WNzJSWsX9RWT4WHurOo7Ey348ZAhGqiPvAC/EerI/ndHRJCMUZjjYZfbR8ngq3Z7DgmkjOs7vlBt9OBpycTEMYjhCGS34AZBIFlWfA3gfwJ0lWjNeIjIWkAAAAASUVORK5CYII=&apos;); background-size: cover; display: block;&quot;
+  &gt;&lt;/span&gt;
+  &lt;img
+        class=&quot;gatsby-resp-image-image&quot;
+        alt=&quot;August Bill&quot;
+        title=&quot;August Bill&quot;
+        src=&quot;/static/133c78179497aa49636ae9131b80eead/fcda8/cost.png&quot;
+        srcset=&quot;/static/133c78179497aa49636ae9131b80eead/12f09/cost.png 148w,
+/static/133c78179497aa49636ae9131b80eead/e4a3f/cost.png 295w,
+/static/133c78179497aa49636ae9131b80eead/fcda8/cost.png 590w,
+/static/133c78179497aa49636ae9131b80eead/efc66/cost.png 885w,
+/static/133c78179497aa49636ae9131b80eead/58bb7/cost.png 985w&quot;
+        sizes=&quot;(max-width: 590px) 100vw, 590px&quot;
+        style=&quot;width:100%;height:100%;margin:0;vertical-align:middle;position:absolute;top:0;left:0;&quot;
+        loading=&quot;lazy&quot;
+      /&gt;
+  &lt;/a&gt;
+    &lt;/span&gt;&lt;/p&gt;
+&lt;h2&gt;Safety Measures&lt;/h2&gt;
+&lt;p&gt;I have two scheduled actions for my autoscale group that prevent me from
+accidentally paying for a month’s worth of instance time. At midnight(ish) every
+night, the autoscale group sets desired and max capacity to 0, which shuts down
+the host if it’s running.&lt;/p&gt;
+&lt;p&gt;Shortly after, I set the max capacity back to 1, so the next time I push the button,
+the host comes on (if you set desired &gt; max, AWS errors).&lt;/p&gt;
+&lt;p&gt;&lt;span
+      class=&quot;gatsby-resp-image-wrapper&quot;
+      style=&quot;position: relative; display: block; margin-left: auto; margin-right: auto;  max-width: 590px;&quot;
+    &gt;
+      &lt;a
+    class=&quot;gatsby-resp-image-link&quot;
+    href=&quot;/static/5360357317b6e8d25b487dc6a57cc455/93582/scheduled-actions.png&quot;
+    style=&quot;display: block&quot;
+    target=&quot;_blank&quot;
+    rel=&quot;noopener&quot;
+  &gt;
+    &lt;span
+    class=&quot;gatsby-resp-image-background-image&quot;
+    style=&quot;padding-bottom: 26.351351351351354%; position: relative; bottom: 0; left: 0; background-image: url(&apos;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAFCAIAAADKYVtkAAAACXBIWXMAAAsSAAALEgHS3X78AAAAy0lEQVQY032PzXKEIBCEef+386CUrmb9W0EICoy4sKubdLK3HDKHr4qeLrqHEdHwO33fK6WmaZJSnuf59e/AEEJgy7IIIbz31tp1XYl8jDGlhE/xdM69dWMMbMho2xZEDFYMi6qqEDvPahzHuq7fFWDtuo5z3jQNL/ilvuR5nmVZURTwl2WptWbhHgepm24EP324DuKjv7U3cR2FNFa7DewnpSzNqwPhMT7IxdEeGdqjpfcU9h3HgEQbbRv4eD6hHMeR0uP15+bXj/ANBRIXg/WSh6AAAAAASUVORK5CYII=&apos;); background-size: cover; display: block;&quot;
+  &gt;&lt;/span&gt;
+  &lt;img
+        class=&quot;gatsby-resp-image-image&quot;
+        alt=&quot;Scheduled Actions&quot;
+        title=&quot;Scheduled Actions&quot;
+        src=&quot;/static/5360357317b6e8d25b487dc6a57cc455/fcda8/scheduled-actions.png&quot;
+        srcset=&quot;/static/5360357317b6e8d25b487dc6a57cc455/12f09/scheduled-actions.png 148w,
+/static/5360357317b6e8d25b487dc6a57cc455/e4a3f/scheduled-actions.png 295w,
+/static/5360357317b6e8d25b487dc6a57cc455/fcda8/scheduled-actions.png 590w,
+/static/5360357317b6e8d25b487dc6a57cc455/efc66/scheduled-actions.png 885w,
+/static/5360357317b6e8d25b487dc6a57cc455/c83ae/scheduled-actions.png 1180w,
+/static/5360357317b6e8d25b487dc6a57cc455/93582/scheduled-actions.png 1524w&quot;
+        sizes=&quot;(max-width: 590px) 100vw, 590px&quot;
+        style=&quot;width:100%;height:100%;margin:0;vertical-align:middle;position:absolute;top:0;left:0;&quot;
+        loading=&quot;lazy&quot;
+      /&gt;
+  &lt;/a&gt;
+    &lt;/span&gt;&lt;/p&gt;
+&lt;h2&gt;Troubleshooting&lt;/h2&gt;
+&lt;p&gt;If you’re first trying to get this running and nothing seems to happen when you push
+the button, first trigger the lambda manually (the hello world payload is fine) and watch
+the &lt;a href=&quot;https://aws.amazon.com/cloudwatch/&quot;&gt;Cloudwatch&lt;/a&gt; logs associated with that run.
+If that all looks good, go manually increase the desired capacity of your autoscale group
+and see what happens there.&lt;/p&gt;
+&lt;p&gt;Ansible’s fun
+&lt;a href=&quot;https://docs.ansible.com/ansible/devel/porting_guides/porting_guide_2.4.html#deprecated&quot;&gt;habit&lt;/a&gt;
+&lt;a href=&quot;https://docs.ansible.com/ansible/devel/porting_guides/porting_guide_2.5.html#deprecated&quot;&gt;of&lt;/a&gt;
+&lt;a href=&quot;https://docs.ansible.com/ansible/devel/porting_guides/porting_guide_2.7.html#deprecated&quot;&gt;deprecating&lt;/a&gt;
+&lt;a href=&quot;https://docs.ansible.com/ansible/devel/porting_guides/porting_guide_2.6.html#deprecated&quot;&gt;commands&lt;/a&gt;
+means if you wait 2 years between pressing your button, you’ll have some commands that fail.
+When that happens, you can still access the host, you’ll just have to sign into the AWS console
+to get the public IP and SSH directly to that instead of whatever DNS you picked.&lt;/p&gt;
+&lt;p&gt;Check &lt;code class=&quot;language-text&quot;&gt;/bootstrap.out&lt;/code&gt; and &lt;code class=&quot;language-text&quot;&gt;/var/log/cloud-init-output.log&lt;/code&gt; for clues.&lt;/p&gt;</content:encoded></item><item><title><![CDATA[Packaging dpkg for S3 in 2017]]></title><description><![CDATA[Trying to make a Debian package and host it on S3 
+is and should be easy. But finding up to date examples and docs hasn’t been. 
+So, to save…]]></description><link>https://terrbear.org/dpkg-apt-s3-2017/</link><guid isPermaLink="false">https://terrbear.org/dpkg-apt-s3-2017/</guid><pubDate>Tue, 12 Dec 2017 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;Trying to make a Debian package and host it on &lt;a href=&quot;https://aws.amazon.com/s3/&quot;&gt;S3&lt;/a&gt;
+is and should be easy. But finding up to date examples and docs hasn’t been.
+So, to save the next person some effort, here are some tools and ways to go about
+building your own Debian package, signing it, and hosting it on S3 such that
+it can be installed with &lt;a href=&quot;https://wiki.debian.org/Apt&quot;&gt;Apt&lt;/a&gt;, in 2017.&lt;/p&gt;
+&lt;p&gt;You can follow along here: &lt;a href=&quot;https://github.com/terrbear/dpkg-example-2017&quot;&gt;GitHub repo&lt;/a&gt;&lt;/p&gt;
+&lt;h2&gt;Authoring the Package&lt;/h2&gt;
+&lt;p&gt;Let’s make a currency bot service that logs the exchange rate of BTC and others
+using &lt;a href=&quot;http://rate.sx&quot;&gt;rate.sx&lt;/a&gt; to /var/log/bubble.&lt;/p&gt;
+&lt;p&gt;Also, just for fun (and demo purposes), on installation we should print the
+current exchange rate.&lt;/p&gt;
+&lt;p&gt;To build the packages, you pass a directory to &lt;a href=&quot;http://man7.org/linux/man-pages/man1/dpkg.1.html&quot;&gt;dpkg&lt;/a&gt;
+that has (1) a DEBIAN directory that has metadata about the package (dependencies, pre/post installation,
+version info, etc) and (2) a map of what you want to lay out on the system.&lt;/p&gt;
+&lt;p&gt;Here’s a layout of our currencybot:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;shell&quot;&gt;&lt;pre class=&quot;language-shell&quot;&gt;&lt;code class=&quot;language-shell&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;token number&quot;&gt;14&lt;/span&gt;:47&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;theath@ego:~/code/dpkg-example/currencybot&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;$ &lt;span class=&quot;token function&quot;&gt;ls&lt;/span&gt; -lR
+total &lt;span class=&quot;token number&quot;&gt;0&lt;/span&gt;
+drwxr-xr-x  &lt;span class=&quot;token number&quot;&gt;4&lt;/span&gt; theath  staff  &lt;span class=&quot;token number&quot;&gt;136&lt;/span&gt; Dec &lt;span class=&quot;token number&quot;&gt;12&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;14&lt;/span&gt;:47 DEBIAN
+drwxr-xr-x  &lt;span class=&quot;token number&quot;&gt;3&lt;/span&gt; theath  staff  &lt;span class=&quot;token number&quot;&gt;102&lt;/span&gt; Dec &lt;span class=&quot;token number&quot;&gt;12&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;14&lt;/span&gt;:45 etc
+
+./DEBIAN:
+total &lt;span class=&quot;token number&quot;&gt;16&lt;/span&gt;
+-rw-r--r--  &lt;span class=&quot;token number&quot;&gt;1&lt;/span&gt; theath  staff  &lt;span class=&quot;token number&quot;&gt;193&lt;/span&gt; Dec &lt;span class=&quot;token number&quot;&gt;12&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;14&lt;/span&gt;:47 control
+-rwxr-xr-x  &lt;span class=&quot;token number&quot;&gt;1&lt;/span&gt; theath  staff   &lt;span class=&quot;token number&quot;&gt;97&lt;/span&gt; Dec &lt;span class=&quot;token number&quot;&gt;12&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;14&lt;/span&gt;:02 postinst
+
+./etc:
+total &lt;span class=&quot;token number&quot;&gt;0&lt;/span&gt;
+drwxr-xr-x  &lt;span class=&quot;token number&quot;&gt;3&lt;/span&gt; theath  staff  &lt;span class=&quot;token number&quot;&gt;102&lt;/span&gt; Dec &lt;span class=&quot;token number&quot;&gt;12&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;14&lt;/span&gt;:46 cron.hourly
+
+./etc/cron.hourly:
+total &lt;span class=&quot;token number&quot;&gt;8&lt;/span&gt;
+-rw-r--r--  &lt;span class=&quot;token number&quot;&gt;1&lt;/span&gt; theath  staff  &lt;span class=&quot;token number&quot;&gt;45&lt;/span&gt; Dec &lt;span class=&quot;token number&quot;&gt;12&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;14&lt;/span&gt;:46 currency&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;DEBIAN/control is required to build a package. Here’s a bare-bones version for
+currencybot that shows it’s dependent on curl, and provides a bit of extra info
+for anyone thinking about installing the package:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;text&quot;&gt;&lt;pre class=&quot;language-text&quot;&gt;&lt;code class=&quot;language-text&quot;&gt;Package: currencybot
+Version: $VERSION
+Architecture: amd64
+Maintainer: terry heath &amp;lt;theath@gmail.com&amp;gt;
+Depends: curl
+Homepage: http://terrbear.org
+Description: Documents the BTC excitement of 2017&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Note the $VERSION. We’ll use that later with &lt;a href=&quot;https://www.gnu.org/software/gettext/manual/html_node/envsubst-Invocation.html&quot;&gt;envsubst&lt;/a&gt;
+to allow easy version revs.&lt;/p&gt;
+&lt;p&gt;And, as mentioned above, the fun immediate print-out of exchange rates goes into
+postinst:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;bash&quot;&gt;&lt;pre class=&quot;language-bash&quot;&gt;&lt;code class=&quot;language-bash&quot;&gt;&lt;span class=&quot;token shebang important&quot;&gt;#!/bin/bash&lt;/span&gt;
+
+&lt;span class=&quot;token function&quot;&gt;curl&lt;/span&gt; rate.sx&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Debian supports more install hooks than just postinst. You can read about all of
+them at &lt;a href=&quot;https://www.debian.org/doc/manuals/debian-faq/ch-pkg_basics.en.html&quot;&gt;Debian.org&lt;/a&gt;.&lt;/p&gt;
+&lt;h2&gt;Building the Package&lt;/h2&gt;
+&lt;p&gt;Now that we have our package set up, we’ll need to use dpkg to build it. While
+I imagine there are ways to install dpkg on OSX, why would you when we have
+&lt;a href=&quot;https://www.docker.com&quot;&gt;Docker&lt;/a&gt;!?&lt;/p&gt;
+&lt;p&gt;Here’s our Dockerfile, which takes a build arg to create whatever version we need:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;docker&quot;&gt;&lt;pre class=&quot;language-docker&quot;&gt;&lt;code class=&quot;language-docker&quot;&gt;&lt;span class=&quot;token keyword&quot;&gt;FROM&lt;/span&gt; ubuntu
+
+&lt;span class=&quot;token keyword&quot;&gt;ARG&lt;/span&gt; version
+
+&lt;span class=&quot;token keyword&quot;&gt;ENV&lt;/span&gt; VERSION $&lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;version&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;RUN&lt;/span&gt; apt&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;get update &amp;amp;&amp;amp; \
+    apt&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;get install &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;y gettext&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;base
+
+&lt;span class=&quot;token keyword&quot;&gt;ADD&lt;/span&gt; currencybot /currencybot&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;$&lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;version&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;RUN&lt;/span&gt; chmod +x /currencybot&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;$&lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;version&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;/DEBIAN/postinst
+
+&lt;span class=&quot;token keyword&quot;&gt;RUN&lt;/span&gt; envsubst &amp;lt; currencybot&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;$&lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;version&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;/DEBIAN/control &lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt; currencybot&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;$&lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;version&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;/DEBIAN/control2 &amp;amp;&amp;amp; \
+    mv currencybot&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;$&lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;version&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;/DEBIAN/control2 currencybot&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;$&lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;version&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;/DEBIAN/control
+
+&lt;span class=&quot;token keyword&quot;&gt;RUN&lt;/span&gt; dpkg &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;b currencybot&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;$&lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;version&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&amp;lt;/code&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&amp;lt;/pre&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&amp;lt;/figure&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;
+
+To go with it&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; a friendly build script&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;
+
+&amp;lt;figure class=&lt;span class=&quot;token string&quot;&gt;&quot;highlight&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&amp;lt;pre&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&amp;lt;code class=&lt;span class=&quot;token string&quot;&gt;&quot;language-bash&quot;&lt;/span&gt; data&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;lang=&lt;span class=&quot;token string&quot;&gt;&quot;bash&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;span class=&quot;token comment&quot;&gt;#!/bin/bash&lt;/span&gt;
+
+if &lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;z &lt;span class=&quot;token string&quot;&gt;&quot;$VERSION&quot;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;; then
+    echo &lt;span class=&quot;token string&quot;&gt;&quot;No version supplied&quot;&lt;/span&gt;
+    exit 1
+fi
+
+docker build &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;build&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;arg version=$VERSION &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;t currencybot&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;deb&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;build . &amp;amp;&amp;amp; \
+docker create &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;name deb currencybot&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;deb&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;build &amp;amp;&amp;amp; \
+docker cp deb&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;/currencybot&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;$VERSION.deb ./currencybot&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;$VERSION.deb &amp;amp;&amp;amp; \
+docker rm &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;f deb&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;We’ll build the package like: &lt;code class=&quot;language-text&quot;&gt;VERSION=1.0.0 ./build.sh&lt;/code&gt;&lt;/p&gt;
+&lt;p&gt;After that, it’s good to try to install it at least once. I don’t have a good reason for this,
+but I like &lt;a href=&quot;https://www.vagrantup.com/&quot;&gt;Vagrant&lt;/a&gt; for testing the installs. You could do this
+with Docker as well though!&lt;/p&gt;
+&lt;p&gt;(I’ve stripped out a bit of the nicer formatting because it translated poorly.)&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;shell&quot;&gt;&lt;pre class=&quot;language-shell&quot;&gt;&lt;code class=&quot;language-shell&quot;&gt;ubuntu@ubuntu-xenial:/vagrant$ &lt;span class=&quot;token function&quot;&gt;sudo&lt;/span&gt; dpkg -i currencybot-1.0.0.deb
+Selecting previously unselected package currencybot.
+&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;Reading database &lt;span class=&quot;token punctuation&quot;&gt;..&lt;/span&gt;. &lt;span class=&quot;token number&quot;&gt;53897&lt;/span&gt; files and directories currently installed.&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;
+Preparing to unpack currencybot-1.0.0.deb &lt;span class=&quot;token punctuation&quot;&gt;..&lt;/span&gt;.
+Unpacking currencybot &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token number&quot;&gt;1.0&lt;/span&gt;.0&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;..&lt;/span&gt;.
+Setting up currencybot &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token number&quot;&gt;1.0&lt;/span&gt;.0&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;..&lt;/span&gt;.
+
+Market Cap: &lt;span class=&quot;token variable&quot;&gt;$497&lt;/span&gt;,632,208,810 ↑
+24h Vol: &lt;span class=&quot;token variable&quot;&gt;$37&lt;/span&gt;,784,464,098 ↑
+BTC Dominance: &lt;span class=&quot;token number&quot;&gt;58.8&lt;/span&gt;% ↑
+┌──────┬───────┬─────────────┬──────────────┬─────────────┬──────────────────┬────────────┐
+│ Rank │ Coin  │ Price &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;USD&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; │ Change &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;24H&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; │ Change &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;1H&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; │ Market Cap &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;USD&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; │ Spark &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;1H&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; │
+├──────┼───────┼─────────────┼──────────────┼─────────────┼──────────────────┼────────────┤
+│ &lt;span class=&quot;token number&quot;&gt;1&lt;/span&gt;    │ BTC   │ &lt;span class=&quot;token number&quot;&gt;17490.1&lt;/span&gt;     │ &lt;span class=&quot;token number&quot;&gt;1.41&lt;/span&gt;%        │ &lt;span class=&quot;token number&quot;&gt;0.19&lt;/span&gt;%       │ &lt;span class=&quot;token number&quot;&gt;292&lt;/span&gt;.731B         │ ▁▁▇▂▁▅▂▁▁▃ │
+├──────┼───────┼─────────────┼──────────────┼─────────────┼──────────────────┼────────────┤
+│ &lt;span class=&quot;token number&quot;&gt;2&lt;/span&gt;    │ ETH   │ &lt;span class=&quot;token number&quot;&gt;610.200&lt;/span&gt;     │ &lt;span class=&quot;token number&quot;&gt;27.67&lt;/span&gt;%       │ -0.65%      │ &lt;span class=&quot;token number&quot;&gt;58&lt;/span&gt;.762B          │ ▅▁▂▃▁▇▃▁▂▁ │
+├──────┼───────┼─────────────┼──────────────┼─────────────┼──────────────────┼────────────┤
+│ &lt;span class=&quot;token number&quot;&gt;3&lt;/span&gt;    │ BCH   │ &lt;span class=&quot;token number&quot;&gt;1632.96&lt;/span&gt;     │ &lt;span class=&quot;token number&quot;&gt;15.08&lt;/span&gt;%       │ &lt;span class=&quot;token number&quot;&gt;1.12&lt;/span&gt;%       │ &lt;span class=&quot;token number&quot;&gt;27&lt;/span&gt;.518B          │ ▁▃▅▃▃▁▇▁▁▃ │
+├──────┼───────┼─────────────┼──────────────┼─────────────┼──────────────────┼────────────┤
+│ &lt;span class=&quot;token number&quot;&gt;4&lt;/span&gt;    │ LTC   │ &lt;span class=&quot;token number&quot;&gt;331.171&lt;/span&gt;     │ &lt;span class=&quot;token number&quot;&gt;60.92&lt;/span&gt;%       │ -1.20%      │ &lt;span class=&quot;token number&quot;&gt;17&lt;/span&gt;.974B          │ ▂▁▇▁▁▂▁▁▁▂ │
+├──────┼───────┼─────────────┼──────────────┼─────────────┼──────────────────┼────────────┤
+│ &lt;span class=&quot;token number&quot;&gt;5&lt;/span&gt;    │ XRP   │ &lt;span class=&quot;token number&quot;&gt;0.375730&lt;/span&gt;    │ &lt;span class=&quot;token number&quot;&gt;49.85&lt;/span&gt;%       │ &lt;span class=&quot;token number&quot;&gt;8.02&lt;/span&gt;%       │ &lt;span class=&quot;token number&quot;&gt;14&lt;/span&gt;.555B          │ ▁▁▁▂▁▁▁▃▁▇ │
+├──────┼───────┼─────────────┼──────────────┼─────────────┼──────────────────┼────────────┤
+│ &lt;span class=&quot;token number&quot;&gt;6&lt;/span&gt;    │ MIOTA │ &lt;span class=&quot;token number&quot;&gt;4.59831&lt;/span&gt;     │ &lt;span class=&quot;token number&quot;&gt;5.93&lt;/span&gt;%        │ &lt;span class=&quot;token number&quot;&gt;1.50&lt;/span&gt;%       │ &lt;span class=&quot;token number&quot;&gt;12&lt;/span&gt;.781B          │ ▁▁▁▂▁▁▅▁▇▁ │
+├──────┼───────┼─────────────┼──────────────┼─────────────┼──────────────────┼────────────┤
+│ &lt;span class=&quot;token number&quot;&gt;7&lt;/span&gt;    │ DASH  │ &lt;span class=&quot;token number&quot;&gt;905.692&lt;/span&gt;     │ &lt;span class=&quot;token number&quot;&gt;20.63&lt;/span&gt;%       │ -1.08%      │ &lt;span class=&quot;token number&quot;&gt;7&lt;/span&gt;.019B           │ ▇▁▇▂▁▁▅▁▃▁ │
+├──────┼───────┼─────────────┼──────────────┼─────────────┼──────────────────┼────────────┤
+│ &lt;span class=&quot;token number&quot;&gt;8&lt;/span&gt;    │ XEM   │ &lt;span class=&quot;token number&quot;&gt;0.550592&lt;/span&gt;    │ &lt;span class=&quot;token number&quot;&gt;17.19&lt;/span&gt;%       │ &lt;span class=&quot;token number&quot;&gt;1.25&lt;/span&gt;%       │ &lt;span class=&quot;token number&quot;&gt;4&lt;/span&gt;.955B           │ ▂▁▂▁▁▇▁▁▂▁ │
+├──────┼───────┼─────────────┼──────────────┼─────────────┼──────────────────┼────────────┤
+│ &lt;span class=&quot;token number&quot;&gt;9&lt;/span&gt;    │ XMR   │ &lt;span class=&quot;token number&quot;&gt;305.197&lt;/span&gt;     │ &lt;span class=&quot;token number&quot;&gt;11.42&lt;/span&gt;%       │ &lt;span class=&quot;token number&quot;&gt;0.82&lt;/span&gt;%       │ &lt;span class=&quot;token number&quot;&gt;4&lt;/span&gt;.715B           │ ▇▁▃▁▁▁▁▁▇▃ │
+├──────┼───────┼─────────────┼──────────────┼─────────────┼──────────────────┼────────────┤
+│ &lt;span class=&quot;token number&quot;&gt;10&lt;/span&gt;   │ BTG   │ &lt;span class=&quot;token number&quot;&gt;272.704&lt;/span&gt;     │ &lt;span class=&quot;token number&quot;&gt;7.85&lt;/span&gt;%        │ &lt;span class=&quot;token number&quot;&gt;0.75&lt;/span&gt;%       │ &lt;span class=&quot;token number&quot;&gt;4&lt;/span&gt;.555B           │ ▅▁▃▇▂▅▂▂▁▁ │
+└──────┴───────┴─────────────┴──────────────┴─────────────┴──────────────────┴────────────┘
+&lt;span class=&quot;token number&quot;&gt;2017&lt;/span&gt;-12-12 &lt;span class=&quot;token number&quot;&gt;22&lt;/span&gt;:05:02.849983 UTC
+
+See rate.sx/:help &lt;span class=&quot;token keyword&quot;&gt;for&lt;/span&gt; &lt;span class=&quot;token builtin class-name&quot;&gt;help&lt;/span&gt; and disclaimer
+&lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;Follow @igor_chubin &lt;span class=&quot;token keyword&quot;&gt;for&lt;/span&gt; rate.sx updates&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;github.com/chubin/rate.sx&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;</content:encoded></item><item><title><![CDATA[AWS Lambda Error Handling and Monitoring]]></title><description><![CDATA[This started as a simple “hey here’s how you make Sentry good in Lambda,” and then
+I just kept going and now it’s how we manage all the…]]></description><link>https://terrbear.org/aws-lambda-error-handling/</link><guid isPermaLink="false">https://terrbear.org/aws-lambda-error-handling/</guid><pubDate>Thu, 30 Nov 2017 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;This started as a simple “hey here’s how you make Sentry good in Lambda,” and then
+I just kept going and now it’s how we manage all the things that could go wrong in
+Lambda in production.&lt;/p&gt;
+&lt;p&gt;I’ve been doing a &lt;em&gt;lot&lt;/em&gt; with &lt;a href=&quot;https://aws.amazon.com/lambda/&quot;&gt;AWS Lambda&lt;/a&gt; lately. Coupling
+it with AWS’s &lt;a href=&quot;https://aws.amazon.com/api-gateway/&quot;&gt;API Gateway&lt;/a&gt;, where
+I work we’ve built an entire API for our control plane. It’s been a lot of fun.&lt;/p&gt;
+&lt;p&gt;But error reporting in Lambda sucks. Without a little help. Here are a few things we’ve
+done to make it better.&lt;/p&gt;
+&lt;h2&gt;Sentry&lt;/h2&gt;
+&lt;p&gt;If you’re like me, the first thing you’ll try to do is install &lt;a href=&quot;https://sentry.io/welcome/&quot;&gt;Sentry&lt;/a&gt;
+and just expect things to work. Except they won’t, because the &lt;a href=&quot;https://github.com/getsentry/raven-node&quot;&gt;Node Sentry client&lt;/a&gt;
+fires asynchronously and your Lambda’s going to exit more often than not before you even know something went
+wrong.&lt;/p&gt;
+&lt;p&gt;I’ll write more later on how we manage our decently sized API, but here’s what the
+error handling looks like now:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;js&quot;&gt;&lt;pre class=&quot;language-js&quot;&gt;&lt;code class=&quot;language-js&quot;&gt;&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; sentry &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;require&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;./sentry&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;token operator&quot;&gt;...&lt;/span&gt;
+  &lt;span class=&quot;token keyword&quot;&gt;try&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;this&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;applyFilters&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;event&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;
+      &lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;then&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;this&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;dispatch&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;event&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;
+      &lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;catch&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token parameter&quot;&gt;error&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+        &lt;span class=&quot;token operator&quot;&gt;...&lt;/span&gt;
+        &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;sentry&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;error&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;then&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;...&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+      &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;catch&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;err&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt; 
+    &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;sentry&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;err&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;then&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;...&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;This way we handle rejected promises and uncaught exceptions.  As with everything,
+reading the underlying code helps a lot (see below). Here’s what our sentry
+wrapper looks like:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;js&quot;&gt;&lt;pre class=&quot;language-js&quot;&gt;&lt;code class=&quot;language-js&quot;&gt;&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; Raven &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;require&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;raven&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; Promise &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;require&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;bluebird&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; &lt;span class=&quot;token constant&quot;&gt;SENTRY_DSN&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; process&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;env&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token constant&quot;&gt;SENTRY_DSN&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+Raven&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;config&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token constant&quot;&gt;SENTRY_DSN&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt; release&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;RELEASE_SHA&quot;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;install&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; capture &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; Promise&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;promisify&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;Raven&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;captureException&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt; context&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; Raven &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+module&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function-variable function&quot;&gt;exports&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;sentry&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token parameter&quot;&gt;err&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; extra &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+  &lt;span class=&quot;token keyword&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;process&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;env&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token constant&quot;&gt;NODE_ENV&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;===&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;test&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; Promise&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;resolve&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+
+  console&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;log&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;sentrying!&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; err&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;capture&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;err&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; extra&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;It’s obvious in hindsight, but yes, there’s a &lt;a href=&quot;https://github.com/getsentry/raven-node/blob/master/lib/client.js#L355&quot;&gt;callback arg&lt;/a&gt;
+in the captureException call that you can promisify, and then you can keep on
+keeping your promises the rest of the time.&lt;/p&gt;
+&lt;h2&gt;Release Tracking&lt;/h2&gt;
+&lt;p&gt;We publish each release to Lambda to Sentry, using their nifty &lt;a href=&quot;https://docs.sentry.io/learn/releases/&quot;&gt;release tracking&lt;/a&gt;
+feature. This yelps us isolate defects to specific releases in specific branches. I just track our releases
+with the git SHA. Because this is backend and we don’t deal with source maps, that’s as easy
+as putting in the &lt;code&gt;release&lt;/code&gt; in the extra data when configuring Raven.&lt;/p&gt;
+&lt;p&gt;Here’s the relevant &lt;a href=&quot;https://webpack.js.org/&quot;&gt;webpack&lt;/a&gt; config section to keep Lambda error reporting
+tied to its commit (you’ll need to find the right envvar to track the SHA/commit yourself):&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;js&quot;&gt;&lt;pre class=&quot;language-js&quot;&gt;&lt;code class=&quot;language-js&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+    test&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token regex&quot;&gt;/\.js$/&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt;
+    use&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;
+      &lt;span class=&quot;token operator&quot;&gt;...&lt;/span&gt;
+      &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+        loader&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; StringReplacePlugin&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;replace&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+          replacements&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;
+            &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+              pattern&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token regex&quot;&gt;/RELEASE_SHA/g&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt;
+              &lt;span class=&quot;token function-variable function&quot;&gt;replacement&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token parameter&quot;&gt;match&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; offset&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; string&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+                &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; process&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;env&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token constant&quot;&gt;GIT_SHA&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+              &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+            &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+          &lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;
+        &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;
+      &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt;
+  &lt;span class=&quot;token operator&quot;&gt;...&lt;/span&gt;
+&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2&gt;Memory Limits and Timeouts&lt;/h2&gt;
+&lt;p&gt;Lambda will (kinda) silently fail when you either (a) try to allocate more memory
+than prescribed, or (b) run past your declared timeout. At this point you won’t
+get a chance to send an event to Sentry, so you’ll need to have another way to
+catch it when it happens.&lt;/p&gt;
+&lt;p&gt;(Really if you exceed any of their &lt;a href=&quot;http://docs.aws.amazon.com/lambda/latest/dg/limits.html&quot;&gt;limits&lt;/a&gt;
+it’ll blow up, but these are the causes we’ve run into most often.)&lt;/p&gt;
+&lt;p&gt;Fortunately, Lambda &lt;em&gt;will&lt;/em&gt; log that it exited prematurely. We can use that!&lt;/p&gt;
+&lt;p&gt;We set up some &lt;a href=&quot;https://aws.amazon.com/cloudwatch/&quot;&gt;CloudWatch&lt;/a&gt; subscriptions
+that look for premature exits. I’d suggest placing these in their own CF template
+because it’s easy to run into the CloudFormation template size limit.&lt;/p&gt;
+&lt;p&gt;Here’s an example CloudFormation log filter subscription definition (the
+important part is the filter pattern):&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;json&quot;&gt;&lt;pre class=&quot;language-json&quot;&gt;&lt;code class=&quot;language-json&quot;&gt;&lt;span class=&quot;token property&quot;&gt;&quot;YourServicePrematureSubscriptionFilter&quot;&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+  &lt;span class=&quot;token property&quot;&gt;&quot;Type&quot;&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;AWS::Logs::SubscriptionFilter&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt;
+  &lt;span class=&quot;token property&quot;&gt;&quot;Properties&quot;&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;token property&quot;&gt;&quot;DestinationArn&quot;&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+      &lt;span class=&quot;token property&quot;&gt;&quot;Fn::Sub&quot;&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:premature-catcher&quot;&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt;
+    &lt;span class=&quot;token property&quot;&gt;&quot;FilterPattern&quot;&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;Process exited before completing&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt;
+    &lt;span class=&quot;token property&quot;&gt;&quot;LogGroupName&quot;&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;/aws/lambda/YourService&quot;&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Any time that log message is seen, it gets sent to a Lambda that notifies us via
+Slack.&lt;/p&gt;
+&lt;p&gt;Here’s a sanitized version of the Lambda that gets invoked when the subscription
+sees an event:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;js&quot;&gt;&lt;pre class=&quot;language-js&quot;&gt;&lt;code class=&quot;language-js&quot;&gt;&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; zlib    &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;require&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;zlib&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+exports&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function-variable function&quot;&gt;handler&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;function&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;handler&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token parameter&quot;&gt;event&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; context&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; callback&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+  console&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;log&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;event: &quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; event&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; payload &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;token class-name&quot;&gt;Buffer&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;event&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;awslogs&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;data&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;base64&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+  zlib&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;gunzip&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;payload&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token parameter&quot;&gt;err&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; res&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;token keyword&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;err&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+      &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;callback&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;err&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+    &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; parsed &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token constant&quot;&gt;JSON&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;parse&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;res&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;toString&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;utf8&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+    console&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;log&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;Decoded payload:&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;token constant&quot;&gt;JSON&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;stringify&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;parsed&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+    &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; msg &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token template-string&quot;&gt;&lt;span class=&quot;token template-punctuation string&quot;&gt;`&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;Lambda premature exit detected in: &lt;/span&gt;&lt;span class=&quot;token interpolation&quot;&gt;&lt;span class=&quot;token interpolation-punctuation punctuation&quot;&gt;${&lt;/span&gt;parsed&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;logGroup&lt;span class=&quot;token interpolation-punctuation punctuation&quot;&gt;}&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt; / &lt;/span&gt;&lt;span class=&quot;token interpolation&quot;&gt;&lt;span class=&quot;token interpolation-punctuation punctuation&quot;&gt;${&lt;/span&gt;parsed&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;logStream&lt;span class=&quot;token interpolation-punctuation punctuation&quot;&gt;}&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token template-punctuation string&quot;&gt;`&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+    &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;yourNotifyHook&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;
+      &lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;then&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;callback&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token keyword&quot;&gt;null&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;,&lt;/span&gt; &lt;span class=&quot;token template-string&quot;&gt;&lt;span class=&quot;token template-punctuation string&quot;&gt;`&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;Successfully processed &lt;/span&gt;&lt;span class=&quot;token interpolation&quot;&gt;&lt;span class=&quot;token interpolation-punctuation punctuation&quot;&gt;${&lt;/span&gt;parsed&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;logEvents&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;length&lt;span class=&quot;token interpolation-punctuation punctuation&quot;&gt;}&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt; log events.&lt;/span&gt;&lt;span class=&quot;token template-punctuation string&quot;&gt;`&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;If you have Sentry, release tracking, and alert when Lambdas exit before they’re
+expected, you’ll know about a lot of errors at the same time your customers do,
+instead of finding out after support does.&lt;/p&gt;</content:encoded></item><item><title><![CDATA[AWS IoT Button + Pushover = Extra Laziness]]></title><description><![CDATA[I’ve four kids (and we’re done). My oldest is 9, and my youngest is 2. The oldest always wakes up around 5am, and the toddler wakes up…]]></description><link>https://terrbear.org/iot-button-plus-pushover/</link><guid isPermaLink="false">https://terrbear.org/iot-button-plus-pushover/</guid><pubDate>Mon, 23 May 2016 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;I’ve four kids (and we’re done). My oldest is 9, and my youngest is 2. The oldest always wakes up around 5am, and the toddler wakes up around 6:30. I don’t like waking up at 6:30, and the oldest can now get her out of the crib.&lt;/p&gt;
+&lt;p&gt;So, every morning around 6:30, I hear the two year old start crying and then get my phone and text my son, who goes to get her. This is mostly great, except I have to wake up enough to send a text message (even just to copy/paste a previous request from the day before).&lt;/p&gt;
+&lt;p&gt;I could suggest that he get her up any time she starts crying after 6:30, but there are circumstances where we don’t want that, so I still want to be manually involved to some extent.&lt;/p&gt;
+&lt;p&gt;Enter the &lt;a href=&quot;https://aws.amazon.com/iot/button/&quot;&gt;Amazon IoT Button&lt;/a&gt;. I hooked that up to an &lt;a href=&quot;https://aws.amazon.com/lambda/&quot;&gt;AWS Lambda&lt;/a&gt; function, which pings &lt;a href=&quot;https://pushover.net/api&quot;&gt;Pushover&lt;/a&gt;, which sends a push notification to my son’s iPad. So, now instead of sending a text, I just push a button and go back to sleep.&lt;/p&gt;
+&lt;p&gt;The code itself is pretty simple. I didn’t really care about input, so it’s just an unused Java inputstream (note that all of the Lambda stuff requires plain Java interactions, so .asJava is necessary if you’re returning a non-primitive). Full repo on GitHub: &lt;a href=&quot;https://github.com/terrbear/iot-pinger/&quot;&gt;terrbear/iot-pinger&lt;/a&gt;:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;text&quot;&gt;&lt;pre class=&quot;language-text&quot;&gt;&lt;code class=&quot;language-text&quot;&gt;package org.terrbear
+
+import dispatch._, Defaults._
+
+import scala.collection.JavaConverters._
+
+import com.amazonaws.services.lambda.runtime.Context
+
+object Natertot {
+  def main(args: Array[String]): Unit = {
+    val notifier = new Notifier
+    val answer = notifier.notify(notifier.YES_PLZ)
+    println(answer())
+  }
+}
+
+class Notifier {
+  val PUSHOVER_KEY = &amp;amp;quot;your-pushover-key&amp;amp;quot;
+  val PUSHOVER_APP_KEY = &amp;amp;quot;your-pushover-app-key&amp;amp;quot;
+  val YES_PLZ = &amp;amp;quot;Can you please get J out of bed?&amp;amp;quot;
+
+  def lambda(input: java.io.InputStream, context: Context) : String = {
+    val logger = context.getLogger
+    logger.log(&amp;amp;quot;got a click!&amp;amp;quot;)
+    logger.log(notify(YES_PLZ)())
+    &amp;amp;quot;all done&amp;amp;quot;
+  }
+
+  def notify(msg: String): Future[String] = {
+    val request = url(&amp;amp;quot;https://api.pushover.net/1/messages.json&amp;amp;quot;).POST &amp;amp;lt;&amp;amp;lt; Map(&amp;amp;quot;token&amp;amp;quot; -&amp;amp;gt; PUSHOVER_APP_KEY, &amp;amp;quot;user&amp;amp;quot; -&amp;amp;gt; PUSHOVER_KEY, &amp;amp;quot;message&amp;amp;quot; -&amp;amp;gt; msg)
+    Http(request OK as.String)
+  }
+}&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;I’m not really embracing &lt;a href=&quot;http://dispatch.databinder.net/Dispatch.html&quot;&gt;Dispatch&lt;/a&gt;’s futures here, but that seemed reasonable for the way it’s running. Also, Lambda wants a class it can instantiate to call the handler method (from my tiny bit of experimentation).&lt;/p&gt;
+&lt;p&gt;Steps to reproduce:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Buy an IoT Button&lt;/li&gt;
+&lt;li&gt;Install Pushover and make an account and register an app&lt;/li&gt;
+&lt;li&gt;Make your own Lambda function - when you’re creating the Lambda function you’ll be given an opportunity to register your IoT Button.&lt;/li&gt;
+&lt;li&gt;Profit.&lt;/li&gt;
+&lt;/ol&gt;</content:encoded></item><item><title><![CDATA[Using Mina with Atlassian Stash]]></title><description><![CDATA[Internally I’m setting up Atlassian’s Stash, and one of the first projects I wanted to get going was my own projects that were previously…]]></description><link>https://terrbear.org/using-mina-with-atlassian-stash/</link><guid isPermaLink="false">https://terrbear.org/using-mina-with-atlassian-stash/</guid><pubDate>Tue, 26 Aug 2014 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;Internally I’m setting up Atlassian’s &lt;a href=&quot;https://www.atlassian.com/software/stash&quot;&gt;Stash&lt;/a&gt;, and one of the first projects I wanted to get going was my own projects that were previously hosted on &lt;a href=&quot;https://github.com/&quot;&gt;Github&lt;/a&gt;.&lt;/p&gt;
+&lt;p&gt;For Rails deployment, I love &lt;a href=&quot;http://nadarei.co/mina/&quot;&gt;Mina&lt;/a&gt;, so I was hoping it’d be as simple as placing my public key on Stash and changing the repository URL in config.rb. Unfortunately, that’s not how Stash works (from what I can tell); it’s username/password driven.&lt;/p&gt;
+&lt;p&gt;Not willing to put a password into an explicit shell call for cloning, I &lt;a href=&quot;https://confluence.atlassian.com/display/STASH/Permanently+authenticating+with+Git+repositories&quot;&gt;dug around&lt;/a&gt;, and turns out Git supports putting authentication values into a file ~/.netrc.&lt;/p&gt;
+&lt;p&gt;At first this is a little janky, but it’s not too different from a public key. It just means the inherent authorizations don’t match up immediately (ie, you can’t login to Github with a public key).&lt;/p&gt;
+&lt;p&gt;I created a user whose only job is to check out the repo, populated my .netrc as:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;text&quot;&gt;&lt;pre class=&quot;language-text&quot;&gt;&lt;code class=&quot;language-text&quot;&gt;machine my.stash.instance
+login deployer
+password BOOM&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;And authentication works magically.&lt;/p&gt;</content:encoded></item><item><title><![CDATA[Historical Nest Usage]]></title><description><![CDATA[The Nest app and website give you 10 days of usage information for your thermostat(s). Unfortunately, they offer no way to view data beyond…]]></description><link>https://terrbear.org/historical-nest-usage/</link><guid isPermaLink="false">https://terrbear.org/historical-nest-usage/</guid><pubDate>Tue, 26 Aug 2014 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;The &lt;a href=&quot;https://nest.com/&quot;&gt;Nest&lt;/a&gt; app and website give you 10 days of usage information for your thermostat(s). Unfortunately, they offer no way to view data beyond that, which sucks if you want to compare usage month to month, or measure changes longer than 10 days (e.g., “did my solar screens make a difference?”).&lt;/p&gt;
+&lt;p&gt;So, I pulled together a few APIs and now have data gathered every 30 minutes that should give me an understand of how changes in behavior/infrastructure affect energy consumption (at least as far as the thermostat is involved).&lt;/p&gt;
+&lt;p&gt;The repository is public on &lt;a href=&quot;https://github.com&quot;&gt;GitHub&lt;/a&gt;: &lt;a href=&quot;https://github.com/terrbear/nest_watcher&quot;&gt;https://github.com/terrbear/nest_watcher&lt;/a&gt;. Pull requests welcome.&lt;/p&gt;
+&lt;p&gt;Just clone the repository, copy the credentials_example.yml into a credentials.yml and add your own info (you can optionally post to &lt;a href=&quot;https://www.stathat.com/&quot;&gt;StatHat&lt;/a&gt;, which I am because it’s awesome and free for under 10 stats), and start it up on a cronjob. You’ll need a &lt;a href=&quot;http://www.wunderground.com/&quot;&gt;Weather Underground&lt;/a&gt; API token (free for personal use).&lt;/p&gt;
+&lt;p&gt;My cronjob is:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;text&quot;&gt;&lt;pre class=&quot;language-text&quot;&gt;&lt;code class=&quot;language-text&quot;&gt;*/15 * * * * /usr/bin/ruby   /home/theath/nest_watcher/reporter.rb &amp;amp;gt;&amp;amp;gt; /home/theath/nest.txt&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;It outputs CSV that looks like:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;text&quot;&gt;&lt;pre class=&quot;language-text&quot;&gt;&lt;code class=&quot;language-text&quot;&gt;02AA01AC12140ACE, Upstairs, 74, 75, true, 78613, 86.6, 48, 2014-09-01 11:02:40 -0500
+02AA01AC131403XP, Downstairs, 72, 73, false, 78613, 86.6, 48, 2014-09-01 11:02:40 -0500&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Which you can then pull into your own spreadsheet over time to see how things are working.&lt;/p&gt;</content:encoded></item><item><title><![CDATA[Setting up Ghost with Passenger]]></title><description><![CDATA[I wanted something simpler to blog with, so I’m trying out Ghost. I’ve not hosted any Node apps before, but I already had a server set up…]]></description><link>https://terrbear.org/setting-up-ghost-with-passenger/</link><guid isPermaLink="false">https://terrbear.org/setting-up-ghost-with-passenger/</guid><pubDate>Sat, 23 Aug 2014 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;I wanted something simpler to blog with, so I’m trying out &lt;a href=&quot;http://ghost.org&quot;&gt;Ghost&lt;/a&gt;. I’ve not hosted any &lt;a href=&quot;http://nodejs.org/&quot;&gt;Node&lt;/a&gt; apps before, but I already had a server set up running &lt;a href=&quot;https://www.phusionpassenger.com/&quot;&gt;Passenger&lt;/a&gt; and &lt;a href=&quot;http://httpd.apache.org/&quot;&gt;Apache&lt;/a&gt; (I’ve not jumped on the Nginx bandwagon yet), so I wanted it to work nicely with that.&lt;/p&gt;
+&lt;p&gt;Having done maybe 2 hours of Node development in my life, I thought you &lt;em&gt;had&lt;/em&gt; to have an app.js, but not so.&lt;/p&gt;
+&lt;p&gt;Here’s my vhost xfile[1][2]:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;text&quot;&gt;&lt;pre class=&quot;language-text&quot;&gt;&lt;code class=&quot;language-text&quot;&gt;&amp;lt;VirtualHost *:80&amp;gt;
+ServerAdmin webmaster@localhost
+ServerName terrbear.org
+ServerAlias www.terrbear.org
+ServerAlias www.terrbear.ninja
+ServerAlias terrbear.ninja
+
+DocumentRoot /var/www/apps/ghost
+PassengerAppRoot /var/www/apps/ghost
+PassengerAppType node
+PassengerStartupFile index.js
+PassengerRestartDir /var/www/apps/ghost/tmp
+
+ErrorLog /var/log/apache2/error.log
+
+LogLevel warn
+
+CustomLog /var/log/apache2/access.log combined
+ServerSignature On
+&amp;lt;/VirtualHost&amp;gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Because Passenger in hosted environments automatically sets NODE_ENV to production, there wasn’t anything else to do here. I did update my config to use MySQL, which worked out of the box. If you’re looking to do the same, copy the travis-ci stanza out and use your own values.&lt;/p&gt;
+&lt;p&gt;[1] New installations of Apache search for sites-enabled/*.conf and mods-enabled/*.conf, so if you copied your old vhost file and can’t figure out why it’s not working, that might be a hint.&lt;/p&gt;
+&lt;p&gt;[2] Yes, I own terrbear.ninja. No, I don’t have DNS setup for it.&lt;/p&gt;</content:encoded></item></channel></rss>

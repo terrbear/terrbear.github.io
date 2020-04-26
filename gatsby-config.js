@@ -1,12 +1,12 @@
 module.exports = {
   siteMetadata: {
-    title: `terrbear.org`,
+    title: `terrbear dot org`,
     author: {
       name: `Terry Heath`,
-      summary: `Code first ask questions later`,
+      summary: `Probably at fault`,
     },
-    description: `Random thoughts from Terry Heath`,
-    siteUrl: `https://gatsby-starter-blog-demo.netlify.com/`,
+    description: `Probably at fault`,
+    siteUrl: `https://terrbear.org/`,
     social: {
       twitter: `terrbeardotorg`,
     },
@@ -33,7 +33,7 @@ module.exports = {
           {
             resolve: `gatsby-remark-images`,
             options: {
-              maxWidth: 590,
+              maxWidth: 590
             },
           },
           `gatsby-remark-prismjs`,

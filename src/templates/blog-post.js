@@ -15,40 +15,22 @@ const BlogPostTemplate = ({ data, pageContext, location }) => {
         title={post.frontmatter.title}
         description={post.frontmatter.description || post.excerpt}
       />
+
       <article>
-        <header>
-          <h1
-            style={{
-              marginBottom: 0,
-            }}
-          >
+        <header className="mb-3">
+          <h1 className="text-3xl font-semibold mb-0">
             {post.frontmatter.title}
           </h1>
-          <p
-            style={{
-              display: `block`,
-            }}
-          >
+          <div className="text-gray-500 text-xs">
             {post.frontmatter.date}
-          </p>
+          </div>
         </header>
         <section dangerouslySetInnerHTML={{ __html: post.html }} />
-        <hr
-          style={{
-          }}
-        />
       </article>
 
-      <nav>
-        <ul
-          style={{
-            display: `flex`,
-            flexWrap: `wrap`,
-            justifyContent: `space-between`,
-            listStyle: `none`,
-            padding: 0,
-          }}
-        >
+      <nav className="mt-10">
+        <hr />
+        <ul className="flex flex-wrap justify-between list-none p-0">
           <li>
             {previous && (
               <Link to={previous.fields.slug} rel="prev">
@@ -80,7 +62,7 @@ export const pageQuery = graphql`
     }
     markdownRemark(fields: { slug: { eq: $slug } }) {
       id
-      excerpt(pruneLength: 160)
+      excerpt(pruneLength: 600)
       html
       frontmatter {
         title

@@ -29,54 +29,54 @@ const Layout = ({ location, title, children }) => {
   const { author, social } = data.site.siteMetadata;
 
   return (
-    <div className="mx-auto" style={{ maxWidth: "max-content" }}>
-      <header>
-        <h1
-          style={{
-            marginTop: 0
-          }}
-        >
-          <Link
-            style={{
-              boxShadow: `none`,
-              color: `inherit`
-            }}
-            to={`/`}
-          >
-            {title}
-          </Link>
-        </h1>
-        <div className="flex justify-end my-1 bg-gray-100 text-3xl">
-          <Image
-            fixed={data.avatar.childImageSharp.fixed}
-            alt={author.name}
-            style={{
-              marginBottom: 0,
-              borderRadius: `100%`,
-              height: "1em",
-              width: "1em",
-              marginTop: ".24em"
-            }}
-            imgStyle={{
-              borderRadius: `50%`
-            }}
-          />
-          <a className="ml-2" href={`https://twitter.com/${social.twitter}`}>
-            <i className="fab fa-twitter"></i>
-          </a>
-          <a
-            className="ml-2"
-            href="https://www.linkedin.com/in/terry-heath-395b4524/"
-          >
-            <i className="fab fa-linkedin-in"></i>
-          </a>
-          <a className="ml-2" href="https://github.com/terrbear">
-            <i className="fab fa-github"></i>
-          </a>
+    <div className="mx-auto mt-3" style={{ maxWidth: "960px" }}>
+      <header className="px-3 py-2 mb-5 bg-gray-100">
+        <div className="flex justify-between my-1 text-3xl">
+          <h1 className="mt-0">
+            <Link
+              style={{
+                boxShadow: `none`,
+                color: `inherit`,
+                fontWeight: 200
+              }}
+              to={`/`}
+            >
+              terrbeardotorg
+            </Link>
+          </h1>
+          <span>
+            <Image
+              fixed={data.avatar.childImageSharp.fixed}
+              alt={author.name}
+              style={{
+                borderRadius: `100%`,
+                height: "1em",
+                width: "1em",
+                marginBottom: "-3px"
+              }}
+              imgStyle={{
+                borderRadius: `50%`
+              }}
+            />
+            <a className="ml-2" href={`https://twitter.com/${social.twitter}`}>
+              <i className="fab fa-twitter"></i>
+            </a>
+            <a
+              className="ml-2"
+              href="https://www.linkedin.com/in/terry-heath-395b4524/"
+            >
+              <i className="fab fa-linkedin-in"></i>
+            </a>
+            <a className="ml-2" href="https://github.com/terrbear">
+              <i className="fab fa-github"></i>
+            </a>
+          </span>
         </div>
       </header>
-      <main>{children}</main>
-      <footer>© {new Date().getFullYear()}</footer>
+      <main className="px-1">{children}</main>
+      <footer className="px-5 py-2 mt-10 bg-gray-100">
+        © Terry Heath {new Date().getFullYear()}
+      </footer>
     </div>
   );
 };

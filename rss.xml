@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title><![CDATA[terrbear dot org]]></title><description><![CDATA[Probably at fault]]></description><link>https://terrbear.org</link><generator>GatsbyJS</generator><lastBuildDate>Mon, 27 Apr 2020 06:30:39 GMT</lastBuildDate><item><title><![CDATA[Opting in to Preview Builds with AWS ALBs]]></title><description><![CDATA[AWS’s application load balancers 
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title><![CDATA[terrbear dot org]]></title><description><![CDATA[Probably at fault]]></description><link>https://terrbear.org</link><generator>GatsbyJS</generator><lastBuildDate>Mon, 27 Apr 2020 06:35:52 GMT</lastBuildDate><item><title><![CDATA[Opting in to Preview Builds with AWS ALBs]]></title><description><![CDATA[AWS’s application load balancers 
 support routing traffic to different locations based on 
 HTTP request characteristics. 
 This is helpful if…]]></description><link>https://terrbear.org/opt-in-previews-with-albs/</link><guid isPermaLink="false">https://terrbear.org/opt-in-previews-with-albs/</guid><pubDate>Mon, 27 Apr 2020 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;AWS’s &lt;a href=&quot;https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html&quot;&gt;application load balancers&lt;/a&gt;
@@ -57,7 +57,7 @@ set a cookie that’ll expire in a month, at which point the user will get sent 
 &lt;p&gt;The button just deletes the cookie and reloads the page.&lt;/p&gt;
 &lt;h2&gt;Step 3: Create the stack&lt;/h2&gt;
 &lt;blockquote&gt;
-&lt;p&gt;&lt;i class=&quot;fab fa-docker&quot;&gt;&lt;/i&gt; The Docker containers are built using &lt;a href=&quot;https://github.com/terrbear/terrbear.github.io/blob/develop/content/blog/opt-in-previews-with-albs/Dockerfile&quot;&gt;this Dockerfile&lt;/a&gt;&lt;/p&gt;
+&lt;p&gt;&lt;i class=&quot;fab fa-docker&quot;&gt;&lt;/i&gt; The Docker containers are built using this &lt;a href=&quot;https://github.com/terrbear/terrbear.github.io/blob/develop/content/blog/opt-in-previews-with-albs/Dockerfile&quot;&gt;Dockerfile&lt;/a&gt;, if you want to create them yourself.&lt;/p&gt;
 &lt;/blockquote&gt;
 &lt;p&gt;This is the CloudFormation snippet that will create the ALB rules.&lt;/p&gt;
 &lt;p&gt;Note that the cookie handling uses wildcards to allow for other cookie values in there.&lt;/p&gt;

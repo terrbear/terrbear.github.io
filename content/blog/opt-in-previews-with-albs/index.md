@@ -6,24 +6,24 @@ date: "2020-04-27"
 AWS's [application load balancers](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html) 
 support routing traffic to different locations based on 
 [HTTP request characteristics](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/listener-update-rules.html). 
-This is helpful if you want to allow users to opt-in to using a new service.
+This is helpful if you want to allow users to opt-in to use a new service.
 
-Typically I've used feature flags to determine if a user should see something on a webapp, but
+Typically I've used feature flags to determine if a user should see new features, but
 feature flags are hard to manage when the feature affects a huge surface area. In this case,
-it's easier to just host an old and new version of the service side-by-side. You can gently bring 
-users into your new features and easily fall back to the old app if something breaks.
+it can be easier to host an old and new version of the service side-by-side. You can gently bring 
+users into your new features and easily fall back to the old app if something is missing.
 
-To let users opt-in, I'll build a workflow like this:
+To let users opt-in, let's build a workflow like this:
 
 1. User goes to mysite.com, sees original service.
 1. Original site shows a button that lets them opt-in to the new service.
 1. When they click the button, a cookie is written. We'll set it as `preview=yes`.
 1. Then the browser refreshes (`window.location.reload()`), re-requesting mysite.com. The ALB sees the preview cookie, and directs traffic to the new service.
-1. They can opt back out of the UI in the new site, which we'll do by removing the cookie.
+1. We'll support opt-out by allowing the new service to delete the cookie.
 
 ## Step 1: Make an old service that allows opt-in
 
-> <i class="fa fa-github"></i> All the resources for this post can be found on [TODO GitHub](https://github.com).
+> <i class="fa fa-github"></i> All the resources for this post can be found on [GitHub](https://github.com/terrbear/terrbear.github.io/tree/develop/content/blog/opt-in-previews-with-albs).
 
 I've made what I think is the simplest proof of concept here:
 
@@ -47,7 +47,7 @@ I've made what I think is the simplest proof of concept here:
 ```
 
 Again, the idea is to let the user write a preview cookie and get a different app. This will
-set a cookie that'll expire in a month, at which point the user will get sent back to the original.
+set a cookie that'll expire in a month, at which point the user will get sent back to the original service.
 
 ## Step 2: Make a preview service that allows opts-out
 
@@ -72,7 +72,7 @@ The button just deletes the cookie and reloads the page.
 
 ## Step 3: Create the stack
 
-> <i class="fab fa-docker"></i> The Docker containers are built using TODODOCKERFILELINK
+> <i class="fab fa-docker"></i> The Docker containers are built using [this Dockerfile](https://github.com/terrbear/terrbear.github.io/blob/develop/content/blog/opt-in-previews-with-albs/Dockerfile)
 
 This is the CloudFormation snippet that will create the ALB rules.
 
@@ -116,7 +116,7 @@ PreviewHeaderRule:
 Essentially the load balancer is set up to forward traffic to OriginalTargetGroup, but then
 we add these rules to tell it that, if either of our rules match, forward to PreviewTargetGroup instead.
 
-Assuming you have a VPC set up with a couple public subnets and an ECS cluster, you can just run
+Assuming you have a VPC set up with a couple public subnets and an ECS cluster, you can run something like
 this:
 
 ```shell
@@ -132,10 +132,9 @@ aws cloudformation create-stack \
 
 If not, you'll have to go by my screenshots.
 
-In AWS, you'll be able to see how the rules dictate ALB traffic flow:
+In AWS, after, the stack is created, you'll be able to see how the ALB rules dictate traffic flow:
 
-> <i class="fas fa-exclamation-triangle"></i> If you use a header like this for XHR requests, remember to update your CORS allowed headers or your requests will be quietly routed to the old service.
-
+> <i class="fas fa-exclamation-triangle"></i> If you use a header like this for XHR requests coming from a different origin, remember to update your allowed CORS headers or your requests will be quietly routed to the old service.
 
 ![ALB Rules](./rules.png)
 
@@ -188,7 +187,7 @@ You can go back and forth ad nauseum.
 
 ## Finishing up
 
-> <i class="far fa-check-circle"></i> Be sure to delete your CloudFormation stack when you're done
+> <i class="fas fa-check-circle"></i> Be sure to delete your CloudFormation stack when you're done
 
 You can update the containers independently through CloudFormation, so you could continually make 
 improvements to your preview version while the original stays in its well-known state.

@@ -25,7 +25,7 @@ const BlogPostTemplate = ({ data, pageContext, location }) => {
             {post.frontmatter.date}
           </div>
         </header>
-        <section dangerouslySetInnerHTML={{ __html: post.html }} />
+        <section style={{ position: "relative", top: 0 }} dangerouslySetInnerHTML={{ __html: post.html }} />
       </article>
 
       <nav className="mt-10">

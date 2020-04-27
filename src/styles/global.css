@@ -34,7 +34,7 @@ article blockquote {
 @media (min-width: 1500px) {
   article blockquote {
     position: absolute;
-    right: 60px;
+    right: -250px;
     width: 200px;
     background-color: #f7fafc;
     padding: 0.5rem;

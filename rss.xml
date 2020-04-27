@@ -1,4 +1,250 @@
-<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title><![CDATA[terrbear dot org]]></title><description><![CDATA[Probably at fault]]></description><link>https://terrbear.org</link><generator>GatsbyJS</generator><lastBuildDate>Sun, 26 Apr 2020 22:57:26 GMT</lastBuildDate><item><title><![CDATA[AWS IoT EC2 Power Button]]></title><description><![CDATA[I recently bought a Pixelbook, 
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title><![CDATA[terrbear dot org]]></title><description><![CDATA[Probably at fault]]></description><link>https://terrbear.org</link><generator>GatsbyJS</generator><lastBuildDate>Mon, 27 Apr 2020 05:58:18 GMT</lastBuildDate><item><title><![CDATA[Opting in to Preview Builds with AWS ALBs]]></title><description><![CDATA[AWS’s application load balancers 
+support routing traffic to different locations based on 
+HTTP request characteristics. 
+This is helpful if…]]></description><link>https://terrbear.org/opt-in-previews-with-albs/</link><guid isPermaLink="false">https://terrbear.org/opt-in-previews-with-albs/</guid><pubDate>Mon, 27 Apr 2020 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;AWS’s &lt;a href=&quot;https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html&quot;&gt;application load balancers&lt;/a&gt;
+support routing traffic to different locations based on
+&lt;a href=&quot;https://docs.aws.amazon.com/elasticloadbalancing/latest/application/listener-update-rules.html&quot;&gt;HTTP request characteristics&lt;/a&gt;.
+This is helpful if you want to allow users to opt-in to use a new service.&lt;/p&gt;
+&lt;p&gt;Typically I’ve used feature flags to determine if a user should see new features, but
+feature flags are hard to manage when the feature affects a huge surface area. In this case,
+it can be easier to host an old and new version of the service side-by-side. You can gently bring
+users into your new features and easily fall back to the old app if something is missing.&lt;/p&gt;
+&lt;p&gt;To let users opt-in, let’s build a workflow like this:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;User goes to mysite.com, sees original service.&lt;/li&gt;
+&lt;li&gt;Original site shows a button that lets them opt-in to the new service.&lt;/li&gt;
+&lt;li&gt;When they click the button, a cookie is written. We’ll set it as &lt;code class=&quot;language-text&quot;&gt;preview=yes&lt;/code&gt;.&lt;/li&gt;
+&lt;li&gt;Then the browser refreshes (&lt;code class=&quot;language-text&quot;&gt;window.location.reload()&lt;/code&gt;), re-requesting mysite.com. The ALB sees the preview cookie, and directs traffic to the new service.&lt;/li&gt;
+&lt;li&gt;We’ll support opt-out by allowing the new service to delete the cookie.&lt;/li&gt;
+&lt;/ol&gt;
+&lt;h2&gt;Step 1: Make an old service that allows opt-in&lt;/h2&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;i class=&quot;fa fa-github&quot;&gt;&lt;/i&gt; All the resources for this post can be found on &lt;a href=&quot;https://github.com/terrbear/terrbear.github.io/tree/develop/content/blog/opt-in-previews-with-albs&quot;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;I’ve made what I think is the simplest proof of concept here:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;html&quot;&gt;&lt;pre class=&quot;language-html&quot;&gt;&lt;code class=&quot;language-html&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;&lt;/span&gt;html&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;
+  &lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;&lt;/span&gt;script&lt;/span&gt; &lt;span class=&quot;token attr-name&quot;&gt;type&lt;/span&gt;&lt;span class=&quot;token attr-value&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&quot;&lt;/span&gt;text/javascript&lt;span class=&quot;token punctuation&quot;&gt;&quot;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token script&quot;&gt;&lt;span class=&quot;token language-javascript&quot;&gt;
+    &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; &lt;span class=&quot;token function-variable function&quot;&gt;preview&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+      &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; expires &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;token class-name&quot;&gt;Date&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+      expires&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;setMonth&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;expires&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;getMonth&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;+&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;1&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;%&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;12&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+      document&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;cookie &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token template-string&quot;&gt;&lt;span class=&quot;token template-punctuation string&quot;&gt;`&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;preview=yes; expires=&lt;/span&gt;&lt;span class=&quot;token interpolation&quot;&gt;&lt;span class=&quot;token interpolation-punctuation punctuation&quot;&gt;${&lt;/span&gt;expires&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;toUTCString&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token interpolation-punctuation punctuation&quot;&gt;}&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;; path=/&lt;/span&gt;&lt;span class=&quot;token template-punctuation string&quot;&gt;`&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+      window&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;location&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;reload&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;/&lt;/span&gt;script&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;
+
+  &lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;&lt;/span&gt;body&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;
+    You&apos;re in the original build. Click here to use the preview! 
+    &lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;&lt;/span&gt;button&lt;/span&gt; &lt;span class=&quot;token attr-name&quot;&gt;onClick&lt;/span&gt;&lt;span class=&quot;token attr-value&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&quot;&lt;/span&gt;preview()&lt;span class=&quot;token punctuation&quot;&gt;&quot;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;Let&apos;s do it&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;/&lt;/span&gt;button&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;
+  &lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;/&lt;/span&gt;body&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;
+&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;/&lt;/span&gt;html&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Again, the idea is to let the user write a preview cookie and get a different app. This will
+set a cookie that’ll expire in a month, at which point the user will get sent back to the original service.&lt;/p&gt;
+&lt;h2&gt;Step 2: Make a preview service that allows opts-out&lt;/h2&gt;
+&lt;p&gt;Our super-advanced preview service that’ll only show up for users who want to opt in:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;html&quot;&gt;&lt;pre class=&quot;language-html&quot;&gt;&lt;code class=&quot;language-html&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;&lt;/span&gt;html&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;
+  &lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;&lt;/span&gt;script&lt;/span&gt; &lt;span class=&quot;token attr-name&quot;&gt;type&lt;/span&gt;&lt;span class=&quot;token attr-value&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&quot;&lt;/span&gt;text/javascript&lt;span class=&quot;token punctuation&quot;&gt;&quot;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token script&quot;&gt;&lt;span class=&quot;token language-javascript&quot;&gt;
+    &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; &lt;span class=&quot;token function-variable function&quot;&gt;unpreview&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+      document&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;cookie &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;preview=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+      window&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;location&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;reload&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;/&lt;/span&gt;script&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;
+
+  &lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;&lt;/span&gt;body&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;
+    You&apos;re in the preview build! &lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;&lt;/span&gt;button&lt;/span&gt; &lt;span class=&quot;token attr-name&quot;&gt;onClick&lt;/span&gt;&lt;span class=&quot;token attr-value&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&quot;&lt;/span&gt;unpreview()&lt;span class=&quot;token punctuation&quot;&gt;&quot;&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;Take me back!&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;/&lt;/span&gt;button&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;
+  &lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;/&lt;/span&gt;body&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;
+&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token tag&quot;&gt;&lt;span class=&quot;token punctuation&quot;&gt;&amp;lt;/&lt;/span&gt;html&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;&gt;&lt;/span&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The button just deletes the cookie and reloads the page.&lt;/p&gt;
+&lt;h2&gt;Step 3: Create the stack&lt;/h2&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;i class=&quot;fab fa-docker&quot;&gt;&lt;/i&gt; The Docker containers are built using &lt;a href=&quot;https://github.com/terrbear/terrbear.github.io/blob/develop/content/blog/opt-in-previews-with-albs/Dockerfile&quot;&gt;this Dockerfile&lt;/a&gt;&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;This is the CloudFormation snippet that will create the ALB rules.&lt;/p&gt;
+&lt;p&gt;Note that the cookie handling uses wildcards to allow for other cookie values in there.&lt;/p&gt;
+&lt;p&gt;I’ve also added an &lt;code class=&quot;language-text&quot;&gt;x-preview&lt;/code&gt; header to make API interactions easier. Note that the “yes”
+for the header value is in quotes because YAML is “helpful.”&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;yml&quot;&gt;&lt;pre class=&quot;language-yml&quot;&gt;&lt;code class=&quot;language-yml&quot;&gt;&lt;span class=&quot;token key atrule&quot;&gt;PreviewCookieRule&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;
+  &lt;span class=&quot;token key atrule&quot;&gt;Type&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; AWS&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;ElasticLoadBalancingV2&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;ListenerRule
+  &lt;span class=&quot;token key atrule&quot;&gt;Properties&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; 
+    &lt;span class=&quot;token key atrule&quot;&gt;Actions&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; 
+      &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;token key atrule&quot;&gt;Type&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; forward
+        &lt;span class=&quot;token key atrule&quot;&gt;TargetGroupArn&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token tag&quot;&gt;!Ref&lt;/span&gt; PreviewTargetGroup
+    &lt;span class=&quot;token key atrule&quot;&gt;Conditions&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; 
+      &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;token key atrule&quot;&gt;Field&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; http&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;header
+        &lt;span class=&quot;token key atrule&quot;&gt;HttpHeaderConfig&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;
+          &lt;span class=&quot;token key atrule&quot;&gt;HttpHeaderName&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; cookie
+          &lt;span class=&quot;token key atrule&quot;&gt;Values&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;
+            &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;*preview=yes*&quot;&lt;/span&gt;
+    &lt;span class=&quot;token key atrule&quot;&gt;ListenerArn&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token tag&quot;&gt;!Ref&lt;/span&gt; HTTPListener
+    &lt;span class=&quot;token key atrule&quot;&gt;Priority&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;3&lt;/span&gt;
+
+&lt;span class=&quot;token key atrule&quot;&gt;PreviewHeaderRule&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;
+  &lt;span class=&quot;token key atrule&quot;&gt;Type&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; AWS&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;ElasticLoadBalancingV2&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;ListenerRule
+  &lt;span class=&quot;token key atrule&quot;&gt;Properties&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; 
+    &lt;span class=&quot;token key atrule&quot;&gt;Actions&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; 
+      &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;token key atrule&quot;&gt;Type&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; forward
+        &lt;span class=&quot;token key atrule&quot;&gt;TargetGroupArn&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token tag&quot;&gt;!Ref&lt;/span&gt; PreviewTargetGroup
+    &lt;span class=&quot;token key atrule&quot;&gt;Conditions&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; 
+      &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;token key atrule&quot;&gt;Field&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; http&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;header
+        &lt;span class=&quot;token key atrule&quot;&gt;HttpHeaderConfig&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;
+          &lt;span class=&quot;token key atrule&quot;&gt;HttpHeaderName&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; x&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;preview
+          &lt;span class=&quot;token key atrule&quot;&gt;Values&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;
+            &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;yes&quot;&lt;/span&gt;
+    &lt;span class=&quot;token key atrule&quot;&gt;ListenerArn&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token tag&quot;&gt;!Ref&lt;/span&gt; HTTPListener
+    &lt;span class=&quot;token key atrule&quot;&gt;Priority&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token number&quot;&gt;4&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Essentially the load balancer is set up to forward traffic to OriginalTargetGroup, but then
+we add these rules to tell it that, if either of our rules match, forward to PreviewTargetGroup instead.&lt;/p&gt;
+&lt;p&gt;Assuming you have a VPC set up with a couple public subnets and an ECS cluster, you can run something like
+this:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;shell&quot;&gt;&lt;pre class=&quot;language-shell&quot;&gt;&lt;code class=&quot;language-shell&quot;&gt;aws cloudformation create-stack &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+  --stack-name example &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+  --template-body &lt;span class=&quot;token string&quot;&gt;&quot;&lt;span class=&quot;token variable&quot;&gt;&lt;span class=&quot;token variable&quot;&gt;$(&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;cat&lt;/span&gt; cf-preview.yml&lt;span class=&quot;token variable&quot;&gt;)&lt;/span&gt;&lt;/span&gt;&quot;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+  --capabilities CAPABILITY_NAMED_IAM &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+  --parameters &lt;span class=&quot;token assign-left variable&quot;&gt;ParameterKey&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;VPC,ParameterValue&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token variable&quot;&gt;$VPCID&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+  &lt;span class=&quot;token assign-left variable&quot;&gt;ParameterKey&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;Subnet1,ParameterValue&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token variable&quot;&gt;$Subnet1ID&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+  &lt;span class=&quot;token assign-left variable&quot;&gt;ParameterKey&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;Subnet2,ParameterValue&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token variable&quot;&gt;$Subnet2ID&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+  &lt;span class=&quot;token assign-left variable&quot;&gt;ParameterKey&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;Cluster,ParameterValue&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token variable&quot;&gt;$ECSClusterName&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;If not, you’ll have to go by my screenshots.&lt;/p&gt;
+&lt;p&gt;In AWS, after, the stack is created, you’ll be able to see how the ALB rules dictate traffic flow:&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;i class=&quot;fas fa-exclamation-triangle&quot;&gt;&lt;/i&gt; If you use a header like this for XHR requests coming from a different origin, remember to update your allowed CORS headers or your requests will be quietly routed to the old service.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;&lt;span
+      class=&quot;gatsby-resp-image-wrapper&quot;
+      style=&quot;position: relative; display: block; margin-left: auto; margin-right: auto;  max-width: 590px;&quot;
+    &gt;
+      &lt;a
+    class=&quot;gatsby-resp-image-link&quot;
+    href=&quot;/static/45a4c5c0ffcad214d21103a86f022d5d/aea0a/rules.png&quot;
+    style=&quot;display: block&quot;
+    target=&quot;_blank&quot;
+    rel=&quot;noopener&quot;
+  &gt;
+    &lt;span
+    class=&quot;gatsby-resp-image-background-image&quot;
+    style=&quot;padding-bottom: 62.83783783783784%; position: relative; bottom: 0; left: 0; background-image: url(&apos;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAANCAYAAACpUE5eAAAACXBIWXMAABYlAAAWJQFJUiTwAAABk0lEQVQ4y4WT6W7bQAyE9f5P1/xpkSCBU8m6rNOyJUu+pvsxoWOkSbvAgHtwZ4ZLKUqSROtkLYvrtdI0VZ7nhs1mo7Is/wnyuJskseLAE/V9r6ZpVNe1xXEctdvtdDgcNM+zgfl38JxlWbSEGO33e0G63W41DIOqqjJF5lw4nU46n89/gX0/8/kpzCMutW1rpF3XGbGDNeeouxPH8Xg0fN6PLpeLqXDxer1apGwvZ5qmG6kDNz3ifafLGXdv5JxFCgMiiBm8nzeE8nl4KkAE8ETzfFCWl3r49azfeau8rFWHXM5vDgFzV/IIcIhTxxzWQxCu6kZFGb6EIO6NjJyEROa8HQ7pOg5xd0+GC0SyLNPqNdY0L5oCEc45t5LvB8mokeDxMyFOun7Q0yrV4yrTa5xayUbIA3MJR3QaEj4Z9hz3hFZycNWE/LapdJxp2mRGbg5RpQnurigKWwOEIP1oymjdz4pSP36+KC5aZWUV8t6b4l3Gqcf7T+SrP4W9cZxUNa2KDW/9JmpNgQT48PX/8NVg/w+rOurTMTZ4CQAAAABJRU5ErkJggg==&apos;); background-size: cover; display: block;&quot;
+  &gt;&lt;/span&gt;
+  &lt;img
+        class=&quot;gatsby-resp-image-image&quot;
+        alt=&quot;ALB Rules&quot;
+        title=&quot;ALB Rules&quot;
+        src=&quot;/static/45a4c5c0ffcad214d21103a86f022d5d/fcda8/rules.png&quot;
+        srcset=&quot;/static/45a4c5c0ffcad214d21103a86f022d5d/12f09/rules.png 148w,
+/static/45a4c5c0ffcad214d21103a86f022d5d/e4a3f/rules.png 295w,
+/static/45a4c5c0ffcad214d21103a86f022d5d/fcda8/rules.png 590w,
+/static/45a4c5c0ffcad214d21103a86f022d5d/efc66/rules.png 885w,
+/static/45a4c5c0ffcad214d21103a86f022d5d/c83ae/rules.png 1180w,
+/static/45a4c5c0ffcad214d21103a86f022d5d/aea0a/rules.png 2018w&quot;
+        sizes=&quot;(max-width: 590px) 100vw, 590px&quot;
+        style=&quot;width:100%;height:100%;margin:0;vertical-align:middle;position:absolute;top:0;left:0;&quot;
+        loading=&quot;lazy&quot;
+      /&gt;
+  &lt;/a&gt;
+    &lt;/span&gt;&lt;/p&gt;
+&lt;h2&gt;Seeing it in action&lt;/h2&gt;
+&lt;p&gt;Here’s the original site:&lt;/p&gt;
+&lt;p&gt;&lt;span
+      class=&quot;gatsby-resp-image-wrapper&quot;
+      style=&quot;position: relative; display: block; margin-left: auto; margin-right: auto;  max-width: 590px;&quot;
+    &gt;
+      &lt;a
+    class=&quot;gatsby-resp-image-link&quot;
+    href=&quot;/static/5a9003cc5e24249d8fe6525d5d7047ff/91f10/original.png&quot;
+    style=&quot;display: block&quot;
+    target=&quot;_blank&quot;
+    rel=&quot;noopener&quot;
+  &gt;
+    &lt;span
+    class=&quot;gatsby-resp-image-background-image&quot;
+    style=&quot;padding-bottom: 20.27027027027027%; position: relative; bottom: 0; left: 0; background-image: url(&apos;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAECAYAAACOXx+WAAAACXBIWXMAABYlAAAWJQFJUiTwAAAAlUlEQVQY061OSQ6EMAzr/x/GnBjOVOxLSxeQ4MQJj2yJH0wkK64dNzFl+UVRfFBVFUII2Pcdy7IIbduirmtYa9VfUD/PE+u6YpomeO/Fm6aB6fsexDAMGMdRnW+aXdcpTH2eZ4XpsRPOOS2ml1JCjBHmui6RnLNEmryUW4/jkLZtmy7nDDnBzH3fupR/vGXwp3qeR/gBjE8sIeX9sFYAAAAASUVORK5CYII=&apos;); background-size: cover; display: block;&quot;
+  &gt;&lt;/span&gt;
+  &lt;img
+        class=&quot;gatsby-resp-image-image&quot;
+        alt=&quot;Original&quot;
+        title=&quot;Original&quot;
+        src=&quot;/static/5a9003cc5e24249d8fe6525d5d7047ff/fcda8/original.png&quot;
+        srcset=&quot;/static/5a9003cc5e24249d8fe6525d5d7047ff/12f09/original.png 148w,
+/static/5a9003cc5e24249d8fe6525d5d7047ff/e4a3f/original.png 295w,
+/static/5a9003cc5e24249d8fe6525d5d7047ff/fcda8/original.png 590w,
+/static/5a9003cc5e24249d8fe6525d5d7047ff/efc66/original.png 885w,
+/static/5a9003cc5e24249d8fe6525d5d7047ff/91f10/original.png 992w&quot;
+        sizes=&quot;(max-width: 590px) 100vw, 590px&quot;
+        style=&quot;width:100%;height:100%;margin:0;vertical-align:middle;position:absolute;top:0;left:0;&quot;
+        loading=&quot;lazy&quot;
+      /&gt;
+  &lt;/a&gt;
+    &lt;/span&gt;&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;shell&quot;&gt;&lt;pre class=&quot;language-shell&quot;&gt;&lt;code class=&quot;language-shell&quot;&gt;~❯ &lt;span class=&quot;token function&quot;&gt;curl&lt;/span&gt; http://example-load-balancer-55775428.us-east-1.elb.amazonaws.com
+&lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;html&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+  &lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;script &lt;span class=&quot;token assign-left variable&quot;&gt;type&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;text/javascript&quot;&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+    const preview &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+      const expires &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; new Date&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+      expires.setMonth&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;expires.getMonth&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; + &lt;span class=&quot;token number&quot;&gt;1&lt;/span&gt; % &lt;span class=&quot;token number&quot;&gt;12&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+      document.cookie &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token variable&quot;&gt;&lt;span class=&quot;token variable&quot;&gt;`&lt;/span&gt;&lt;span class=&quot;token assign-left variable&quot;&gt;preview&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;yes&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt; &lt;span class=&quot;token assign-left variable&quot;&gt;expires&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;$&lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;expires.toUTCString&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt; &lt;span class=&quot;token assign-left variable&quot;&gt;path&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;/&lt;span class=&quot;token variable&quot;&gt;`&lt;/span&gt;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+      window.location.reload&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;/script&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+
+  &lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;body&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+    You&lt;span class=&quot;token string&quot;&gt;&apos;re in the original build. Click here to use the preview! &amp;lt;button onClick=&quot;preview()&quot;&gt;Let&apos;&lt;/span&gt;s &lt;span class=&quot;token keyword&quot;&gt;do&lt;/span&gt; it&lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;/button&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+  &lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;/body&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+&lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;/html&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;And here’s our fancy preview version:&lt;/p&gt;
+&lt;p&gt;&lt;span
+      class=&quot;gatsby-resp-image-wrapper&quot;
+      style=&quot;position: relative; display: block; margin-left: auto; margin-right: auto;  max-width: 590px;&quot;
+    &gt;
+      &lt;a
+    class=&quot;gatsby-resp-image-link&quot;
+    href=&quot;/static/47d8b0c8158e03c886a54eff604f5848/20982/preview.png&quot;
+    style=&quot;display: block&quot;
+    target=&quot;_blank&quot;
+    rel=&quot;noopener&quot;
+  &gt;
+    &lt;span
+    class=&quot;gatsby-resp-image-background-image&quot;
+    style=&quot;padding-bottom: 29.054054054054056%; position: relative; bottom: 0; left: 0; background-image: url(&apos;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAAGCAYAAADDl76dAAAACXBIWXMAABYlAAAWJQFJUiTwAAAAvUlEQVQY052PWQuDMBCE8///mBb7ZEnxwHgfeOD5JOqUXYjYh7bQhY/JbrLDRJjmDYZhwrLuKIoCTdMwaZqeeJ4H3/dZ9VlDfVmWWJYFeZ5DSPmEbT8gpUSWZWxKxHGMKIqQJAlc130zIRzH4TlpGIa8QyqUUtxQEnpAJrRAGgQBz+Z5RlVVqOua07Rti+M4TvZ9x7ZtrKLve4zjyNBXqSemaWLtug7rumIYBjbW+qkE/qxrwivi2+Uv9O61XlWcxxPF2uePAAAAAElFTkSuQmCC&apos;); background-size: cover; display: block;&quot;
+  &gt;&lt;/span&gt;
+  &lt;img
+        class=&quot;gatsby-resp-image-image&quot;
+        alt=&quot;Preview&quot;
+        title=&quot;Preview&quot;
+        src=&quot;/static/47d8b0c8158e03c886a54eff604f5848/fcda8/preview.png&quot;
+        srcset=&quot;/static/47d8b0c8158e03c886a54eff604f5848/12f09/preview.png 148w,
+/static/47d8b0c8158e03c886a54eff604f5848/e4a3f/preview.png 295w,
+/static/47d8b0c8158e03c886a54eff604f5848/fcda8/preview.png 590w,
+/static/47d8b0c8158e03c886a54eff604f5848/20982/preview.png 778w&quot;
+        sizes=&quot;(max-width: 590px) 100vw, 590px&quot;
+        style=&quot;width:100%;height:100%;margin:0;vertical-align:middle;position:absolute;top:0;left:0;&quot;
+        loading=&quot;lazy&quot;
+      /&gt;
+  &lt;/a&gt;
+    &lt;/span&gt;&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;shell&quot;&gt;&lt;pre class=&quot;language-shell&quot;&gt;&lt;code class=&quot;language-shell&quot;&gt;~❯ &lt;span class=&quot;token function&quot;&gt;curl&lt;/span&gt; -H &lt;span class=&quot;token string&quot;&gt;&quot;x-preview: yes&quot;&lt;/span&gt; http://example-load-balancer-55775428.us-east-1.elb.amazonaws.com
+&lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;html&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+  &lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;script &lt;span class=&quot;token assign-left variable&quot;&gt;type&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;text/javascript&quot;&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+    const unpreview &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+      document.cookie &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;preview=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+      window.location.reload&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;/script&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+
+  &lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;body&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+    You&apos;re &lt;span class=&quot;token keyword&quot;&gt;in&lt;/span&gt; the preview build&lt;span class=&quot;token operator&quot;&gt;!&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;button &lt;span class=&quot;token assign-left variable&quot;&gt;onClick&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;unpreview()&quot;&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;Take me back&lt;span class=&quot;token operator&quot;&gt;!&lt;/span&gt;&lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;/button&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+  &lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;/body&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;
+&lt;span class=&quot;token operator&quot;&gt;&amp;lt;&lt;/span&gt;/html&lt;span class=&quot;token operator&quot;&gt;&gt;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;You can go back and forth ad nauseum. &lt;/p&gt;
+&lt;h2&gt;Finishing up&lt;/h2&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;i class=&quot;fas fa-check-circle&quot;&gt;&lt;/i&gt; Be sure to delete your CloudFormation stack when you’re done&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;You can update the containers independently through CloudFormation, so you could continually make
+improvements to your preview version while the original stays in its well-known state.&lt;/p&gt;
+&lt;p&gt;Once happy with the preview version, you’d want to update the original service to use the new
+container version, and remove the ALB rules. The preview cookie wouldn’t cause any problems, For
+more real-world usage, I’d suggest using something other than “yes” (like the new version name),
+to prevent cookie hoarders from accidentally opting in to something they didn’t mean to.&lt;/p&gt;</content:encoded></item><item><title><![CDATA[AWS IoT EC2 Power Button]]></title><description><![CDATA[I recently bought a Pixelbook, 
 which is great for lots of things, but not coding. I knew this at purchase time, however, 
 so I just planned…]]></description><link>https://terrbear.org/iot-power-button/</link><guid isPermaLink="false">https://terrbear.org/iot-power-button/</guid><pubDate>Sun, 26 Aug 2018 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;I recently bought a &lt;a href=&quot;https://store.google.com/us/product/google_pixelbook&quot;&gt;Pixelbook&lt;/a&gt;,
 which is great for lots of things, but not coding. I knew this at purchase time, however,

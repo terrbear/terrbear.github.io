@@ -1,0 +1,224 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  VPC:
+    Type: String
+  Subnet1:
+    Type: String
+  Subnet2:
+    Type: String
+  Cluster:
+    Type: String
+
+Resources:
+  TaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: example-task-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  PreviewTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: example
+      NetworkMode: awsvpc
+      Cpu: 256
+      Memory: 512
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Name: example-preview
+          Image: terrbear/preview-example:preview
+          PortMappings:
+            - ContainerPort: 80
+          Essential: true
+
+  OriginalTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: example
+      NetworkMode: awsvpc
+      Cpu: 256
+      Memory: 512
+      RequiresCompatibilities:
+        - FARGATE
+      ContainerDefinitions:
+        - Name: example-original
+          Image: terrbear/preview-example:original
+          PortMappings:
+            - ContainerPort: 80
+          Essential: true
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ALB security group
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: '0'
+          ToPort: '65535'
+          CidrIp: 0.0.0.0/0
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: example-load-balancer
+      Scheme: internet-facing
+      Subnets:
+        - !Ref Subnet1
+        - !Ref Subnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+
+  OriginalTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: original-target-group
+      VpcId: !Ref VPC
+      Port: 80
+      Protocol: HTTP
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      Matcher:
+        HttpCode: '200'
+      TargetType: ip
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 3
+
+  PreviewTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: preview-target-group
+      VpcId: !Ref VPC
+      Port: 80
+      Protocol: HTTP
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      Matcher:
+        HttpCode: '200'
+      TargetType: ip
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 3
+
+  PreviewCookieRule:
+      Type: AWS::ElasticLoadBalancingV2::ListenerRule
+      Properties: 
+        Actions: 
+          - Type: forward
+            TargetGroupArn: !Ref PreviewTargetGroup
+        Conditions: 
+          - Field: http-header
+            HttpHeaderConfig:
+              HttpHeaderName: cookie
+              Values:
+                - "*preview=yes*"
+        ListenerArn: !Ref HTTPListener
+        Priority: 3
+
+  PreviewHeaderRule:
+      Type: AWS::ElasticLoadBalancingV2::ListenerRule
+      Properties: 
+        Actions: 
+          - Type: forward
+            TargetGroupArn: !Ref PreviewTargetGroup
+        Conditions: 
+          - Field: http-header
+            HttpHeaderConfig:
+              HttpHeaderName: x-preview
+              Values:
+                - "yes"
+        ListenerArn: !Ref HTTPListener
+        Priority: 4
+
+  HTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref OriginalTargetGroup
+
+  ServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Service SG
+      VpcId: vpc-5bc8243c
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          SourceSecurityGroupId: !GetAtt ALBSecurityGroup.GroupId
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: '0'
+          ToPort: '65535'
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: example-service-security-group
+
+  OriginalService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - HTTPListener
+    Properties:
+      ServiceName: example-original-service
+      LaunchType: FARGATE
+      TaskDefinition: !Ref OriginalTaskDefinition
+      Cluster: !Ref Cluster
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ServiceSecurityGroup
+          Subnets:
+            - !Ref Subnet1
+            - !Ref Subnet2
+      DesiredCount: 1
+      LoadBalancers:
+        - TargetGroupArn: !Ref OriginalTargetGroup
+          ContainerPort: 80
+          ContainerName: example-original
+
+  PreviewService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - HTTPListener
+    Properties:
+      ServiceName: example-preview-service
+      LaunchType: FARGATE
+      TaskDefinition: !Ref PreviewTaskDefinition
+      Cluster: !Ref Cluster
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ServiceSecurityGroup
+          Subnets:
+            - !Ref Subnet1
+            - !Ref Subnet2
+      DesiredCount: 1
+      LoadBalancers:
+        - TargetGroupArn: !Ref PreviewTargetGroup
+          ContainerPort: 80
+          ContainerName: example-preview

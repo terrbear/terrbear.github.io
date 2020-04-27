@@ -1,0 +1,15 @@
+<html>
+  <script type="text/javascript">
+    const preview = () => {
+      const expires = new Date();
+      expires.setMonth(expires.getMonth() + 1 % 12);
+      document.cookie = `preview=yes; expires=${expires.toUTCString()}; path=/`;
+
+      window.location.reload();
+    };
+  </script>
+
+  <body>
+    You're in the original build. Click here to use the preview! <button onClick="preview()">Let's do it</button>
+  </body>
+</html>

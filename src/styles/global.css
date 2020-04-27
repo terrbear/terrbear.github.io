@@ -23,20 +23,22 @@ article h2 {
   padding-left: 15px;
 }
 
-@media (min-width: 1500px) {
-  article blockquote {
-    position: absolute;
-    right: 5px;
-    width: 300px;
-  }
-}
-
 article blockquote {
   padding: 0.5rem 3rem;
   font-style: italic;
   margin-bottom: 1.5rem;
   margin-top: 1.5rem;
   font-weight: 300;
+}
+
+@media (min-width: 1500px) {
+  article blockquote {
+    position: absolute;
+    right: 60px;
+    width: 200px;
+    background-color: #f7fafc;
+    padding: 0.5rem;
+  }
 }
 
 article blockquote p:last-child {

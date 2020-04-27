@@ -72,7 +72,7 @@ The button just deletes the cookie and reloads the page.
 
 ## Step 3: Create the stack
 
-> <i class="fab fa-docker"></i> The Docker containers are built using [this Dockerfile](https://github.com/terrbear/terrbear.github.io/blob/develop/content/blog/opt-in-previews-with-albs/Dockerfile)
+> <i class="fab fa-docker"></i> The Docker containers are built using this [Dockerfile](https://github.com/terrbear/terrbear.github.io/blob/develop/content/blog/opt-in-previews-with-albs/Dockerfile), if you want to create them yourself.
 
 This is the CloudFormation snippet that will create the ALB rules.
 

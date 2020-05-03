@@ -1,24 +1,27 @@
-<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title><![CDATA[terrbear dot org]]></title><description><![CDATA[Probably at fault]]></description><link>https://terrbear.org</link><generator>GatsbyJS</generator><lastBuildDate>Sun, 03 May 2020 01:16:09 GMT</lastBuildDate><item><title><![CDATA[On Demand Windows Machine in AWS]]></title><description><![CDATA[A few years back, I used a setup like this for my own remote-development host in AWS. 
-It worked most of the time, but I didn’t pin Ansible…]]></description><link>https://terrbear.org/on-demand-windows-machine/</link><guid isPermaLink="false">https://terrbear.org/on-demand-windows-machine/</guid><pubDate>Sun, 03 May 2020 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;A few years back, I used a setup like this for my own &lt;a href=&quot;https://terrbear.org/iot-power-button/&quot;&gt;remote-development host in AWS&lt;/a&gt;.
-It worked most of the time, but I didn’t pin Ansible versions and would have to
-troubleshoot why things didn’t bootstrap correctly every few weeks, and eventually
-settled on tunneling into my Macbook.&lt;/p&gt;
-&lt;p&gt;Around that time, my wife’s EEEPC became unusably slow. Her embroidery machine
-requires software that only runs on Windows. &lt;/p&gt;
-&lt;p&gt;Not wanting to buy a new computer for 2 hours of use per month, I set up a t2.large
-(now a t3.large) up on AWS and switched the IoT button to switch it on/off. This
-stack ends up costing less than $10/month (the EIP is the bulk of the cost),
-takes up no space in the house, and requires almost zero maintenance. Here’s how to do it.&lt;/p&gt;
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title><![CDATA[terrbear dot org]]></title><description><![CDATA[Probably at fault]]></description><link>https://terrbear.org</link><generator>GatsbyJS</generator><lastBuildDate>Sun, 03 May 2020 09:03:42 GMT</lastBuildDate><item><title><![CDATA[On Demand Windows Machine in AWS]]></title><description><![CDATA[A few years back, my wife needed a new Windows machine. I didn’t want to get new
+hardware, so I convinced her to try out an EC2 instance…]]></description><link>https://terrbear.org/on-demand-windows-machine/</link><guid isPermaLink="false">https://terrbear.org/on-demand-windows-machine/</guid><pubDate>Sun, 03 May 2020 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;A few years back, my wife needed a new Windows machine. I didn’t want to get new
+hardware, so I convinced her to try out an EC2 instance instead. Instead of
+an EEEPC with an 8” screen, she got upgraded to a Macbook that would RDP into an
+EC2 instance. &lt;/p&gt;
+&lt;p&gt;Using a t3.large and an IoT button for powering on/off, this costs less than $10/month.
+It takes up no space in the house, and the maintenance is almost zero. The workflow
+looks like this:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Push power button (IoT or iOS shortcut) -&gt; trigger a lambda that starts the EC2 instance&lt;/li&gt;
+&lt;li&gt;Wait 30 seconds&lt;/li&gt;
+&lt;li&gt;Start RDP client into Windows machine (connectivity is restricted by security groups)&lt;/li&gt;
+&lt;li&gt;Profit&lt;/li&gt;
+&lt;/ol&gt;
+&lt;br/&gt;
+&lt;p&gt;Here’s how to do it.&lt;/p&gt;
 &lt;blockquote&gt;
 &lt;p&gt;&lt;i class=&quot;fa fa-github&quot;&gt;&lt;/i&gt; All the resources for this post can be found on &lt;a href=&quot;https://github.com/terrbear/terrbear.github.io/tree/develop/content/blog/on-demand-windows-machine/resources&quot;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
 &lt;/blockquote&gt;
 &lt;h2&gt;Overview&lt;/h2&gt;
-&lt;p&gt;To keep the host easily accessible after setup, we’re going to use an Elastic IP.
-You can save the connection information in your RDP client and won’t have to jump
-into the AWS console to find the IP.&lt;/p&gt;
-&lt;p&gt;The security group is only going to allow access to your WAN IP. I have a cronjob
-that updates the stack periodically with our home IP. The cronjob looks like this
-and runs hourly:&lt;/p&gt;
+&lt;p&gt;We’re going to stand up a CloudFormation stack that uses an Elastic IP to keep
+connectivity save-able in the RDP client. The EC2 instance will have a security
+group that only allows ingress traffic from your WAN IP. I maintain that rule
+with a cronjob that runs hourly:&lt;/p&gt;
 &lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;cron&quot;&gt;&lt;pre class=&quot;language-cron&quot;&gt;&lt;code class=&quot;language-cron&quot;&gt;0 * * * * /usr/local/bin/aws cloudformation deploy --stack-name windows-box --template-file ~user/cloudformation/cf-auto-windows-box.yml --parameter-overrides &amp;quot;ClientIP=$(curl ifconfig.co)&amp;quot; --no-fail-on-empty-changeset&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;You’ll have to fill in your own VPC and subnet IDs for this stack - the host needs
 internet access. Using this
@@ -65,7 +68,7 @@ exports&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span cl
 
   &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; ec2&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;startInstances&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;params&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;promise&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
 &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
-&lt;p&gt;The &lt;code class=&quot;language-text&quot;&gt;power-off&lt;/code&gt; lambda, on the other hand, always turns the machine off:&lt;/p&gt;
+&lt;p&gt;The &lt;code class=&quot;language-text&quot;&gt;power-off&lt;/code&gt; lambda, unsurprisingly, always turns the machine off:&lt;/p&gt;
 &lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;js&quot;&gt;&lt;pre class=&quot;language-js&quot;&gt;&lt;code class=&quot;language-js&quot;&gt;&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; &lt;span class=&quot;token constant&quot;&gt;AWS&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;require&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;aws-sdk&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
 
 &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; instanceId &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; process&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;env&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token constant&quot;&gt;INSTANCE_ID&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
@@ -128,7 +131,15 @@ your timezone (in Pacific/Auckland I’ve got it set to 1am-ish).&lt;/p&gt;
 &lt;span class=&quot;gatsby-highlight-code-line&quot;&gt;    &lt;span class=&quot;token key atrule&quot;&gt;ScheduleExpression&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; cron(0 13 * * &lt;span class=&quot;token punctuation&quot;&gt;?&lt;/span&gt; &lt;span class=&quot;token important&quot;&gt;*)&lt;/span&gt;&lt;/span&gt;    &lt;span class=&quot;token key atrule&quot;&gt;State&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; ENABLED
     &lt;span class=&quot;token key atrule&quot;&gt;Targets&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;
       &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;token key atrule&quot;&gt;Arn&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token tag&quot;&gt;!GetAtt&lt;/span&gt; PowerOff.Arn
-        &lt;span class=&quot;token key atrule&quot;&gt;Id&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; PowerOffNightly&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;</content:encoded></item><item><title><![CDATA[Opting in to Preview Builds with AWS ALBs]]></title><description><![CDATA[AWS’s application load balancers 
+        &lt;span class=&quot;token key atrule&quot;&gt;Id&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; PowerOffNightly&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2&gt;Wrapping Up&lt;/h2&gt;
+&lt;p&gt;We’ve had this setup running for a few years now. Moving from Austin to Wellington made
+the latency painful, so I recently recreated the instance in Sydney (it was in us-east-1).&lt;/p&gt;
+&lt;p&gt;Maintenance has been, as mentioned, light. I changed the instance type from T2 to T3
+without any hiccups. We keep EBS snapshots around, and the OSX RDP client is pretty solid -
+she can mount USB drives and drag files to/from the instance.&lt;/p&gt;
+&lt;p&gt;Even at her peak usage, this started in 2018, so generously 24 months at $10/month is $240.
+An actual machine with the same specs would have cost significantly more :)&lt;/p&gt;</content:encoded></item><item><title><![CDATA[Opting in to Preview Builds with AWS ALBs]]></title><description><![CDATA[AWS’s application load balancers 
 support routing traffic to different locations based on 
 HTTP request characteristics. 
 This is helpful if…]]></description><link>https://terrbear.org/opt-in-previews-with-albs/</link><guid isPermaLink="false">https://terrbear.org/opt-in-previews-with-albs/</guid><pubDate>Mon, 27 Apr 2020 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;AWS’s &lt;a href=&quot;https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html&quot;&gt;application load balancers&lt;/a&gt;

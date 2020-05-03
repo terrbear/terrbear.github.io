@@ -21,7 +21,7 @@ To let users opt-in, let's build a workflow like this:
 1. Then the browser refreshes (`window.location.reload()`), re-requesting mysite.com. The ALB sees the preview cookie, and directs traffic to the new service.
 1. We'll support opt-out by allowing the new service to delete the cookie.
 
-## Step 1: Make an old service that allows opt-in
+## Step 1: Make a service that allows opt-in
 
 > <i class="fa fa-github"></i> All the resources for this post can be found on [GitHub](https://github.com/terrbear/terrbear.github.io/tree/develop/content/blog/opt-in-previews-with-albs).
 

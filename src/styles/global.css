@@ -68,7 +68,7 @@ article ol {
 }
 
 .gatsby-highlight-code-line {
-  background-color: #feb;
+  background-color: hsl(209, 20%, 38%);
   display: block;
   margin-right: -1em;
   margin-left: -1em;

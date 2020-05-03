@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  KeyPair:
+    Type: AWS::EC2::KeyPair::KeyName
+    ConstraintDescription: Must be the name of an existing EC2 KeyPair.
+  InstanceType:
+    Type: String
+    AllowedValues:
+      - t3.small
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+    Default: t3.small
+  VPC:
+    Type: AWS::EC2::VPC::Id
+  Subnet:
+    Type: AWS::EC2::Subnet::Id
+  ClientIP:
+    Type: String
+
+Resources:
+  MgmtIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref WindowsBox
+
+  WindowsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: windows box security group
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: -1
+          FromPort: -1
+          CidrIp: !Sub "${ClientIP}/32"
+          Description: "my house"
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: -1
+          CidrIp: 0.0.0.0/0
+
+  WindowsBox:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0c278895328cddfdd
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPair
+      SubnetId: !Ref Subnet
+      SecurityGroupIds: 
+        - !Ref WindowsSecurityGroup
+      Tags:
+        - Key: Name
+          Value: windows-box
+
+  PowerSwitchRole: 
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: power-switch-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: power-switch-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                Resource:
+                  - "*"
+              - Effect: Allow
+                Action:
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                Resource:
+                  - !Sub "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/${WindowsBox}"
+
+  PowerSwitch:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: power-switch
+      Handler: index.handler
+      Role: !GetAtt PowerSwitchRole.Arn
+      Code:
+        ZipFile: |
+          const AWS = require("aws-sdk");
+
+          const instanceId = process.env.INSTANCE_ID;
+
+          const ec2 = new AWS.EC2();
+
+          const checkIfRunning = async () => {
+            const response = await ec2
+              .describeInstances({ InstanceIds: [instanceId] })
+              .promise();
+            return response.Reservations[0].Instances[0].State.Name !== "stopped";
+          };
+
+          exports.handler = async () => {
+            const params = {
+              InstanceIds: [instanceId]
+            };
+
+            const running = await checkIfRunning();
+
+            if (running) {
+              return ec2.stopInstances(params).promise();
+            }
+
+            return ec2.startInstances(params).promise();
+          };
+
+      Runtime: nodejs12.x
+      Environment:
+        Variables:
+          INSTANCE_ID: !Ref WindowsBox
+      Timeout: 3
+
+  PowerOffNightlyRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: power-off-nightly
+      Description: powers off the instance daily
+      ScheduleExpression: cron(0 13 * * ? *)
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt PowerOff.Arn
+          Id: PowerOffNightly
+
+  PowerOff:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: power-off
+      Handler: index.handler
+      Role: !GetAtt PowerSwitchRole.Arn
+      Code:
+        ZipFile: |
+          const AWS = require("aws-sdk");
+
+          const instanceId = process.env.INSTANCE_ID;
+
+          const ec2 = new AWS.EC2();
+
+          exports.handler = () => {
+            const params = {
+              InstanceIds: [instanceId]
+            };
+            return ec2.stopInstances(params).promise();
+          };
+
+      Runtime: nodejs12.x
+      Environment:
+        Variables:
+          INSTANCE_ID: !Ref WindowsBox
+      Timeout: 3

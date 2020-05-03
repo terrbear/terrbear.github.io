@@ -1,4 +1,134 @@
-<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title><![CDATA[terrbear dot org]]></title><description><![CDATA[Probably at fault]]></description><link>https://terrbear.org</link><generator>GatsbyJS</generator><lastBuildDate>Mon, 27 Apr 2020 07:47:26 GMT</lastBuildDate><item><title><![CDATA[Opting in to Preview Builds with AWS ALBs]]></title><description><![CDATA[AWS’s application load balancers 
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0"><channel><title><![CDATA[terrbear dot org]]></title><description><![CDATA[Probably at fault]]></description><link>https://terrbear.org</link><generator>GatsbyJS</generator><lastBuildDate>Sun, 03 May 2020 01:16:09 GMT</lastBuildDate><item><title><![CDATA[On Demand Windows Machine in AWS]]></title><description><![CDATA[A few years back, I used a setup like this for my own remote-development host in AWS. 
+It worked most of the time, but I didn’t pin Ansible…]]></description><link>https://terrbear.org/on-demand-windows-machine/</link><guid isPermaLink="false">https://terrbear.org/on-demand-windows-machine/</guid><pubDate>Sun, 03 May 2020 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;A few years back, I used a setup like this for my own &lt;a href=&quot;https://terrbear.org/iot-power-button/&quot;&gt;remote-development host in AWS&lt;/a&gt;.
+It worked most of the time, but I didn’t pin Ansible versions and would have to
+troubleshoot why things didn’t bootstrap correctly every few weeks, and eventually
+settled on tunneling into my Macbook.&lt;/p&gt;
+&lt;p&gt;Around that time, my wife’s EEEPC became unusably slow. Her embroidery machine
+requires software that only runs on Windows. &lt;/p&gt;
+&lt;p&gt;Not wanting to buy a new computer for 2 hours of use per month, I set up a t2.large
+(now a t3.large) up on AWS and switched the IoT button to switch it on/off. This
+stack ends up costing less than $10/month (the EIP is the bulk of the cost),
+takes up no space in the house, and requires almost zero maintenance. Here’s how to do it.&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;i class=&quot;fa fa-github&quot;&gt;&lt;/i&gt; All the resources for this post can be found on &lt;a href=&quot;https://github.com/terrbear/terrbear.github.io/tree/develop/content/blog/on-demand-windows-machine/resources&quot;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;h2&gt;Overview&lt;/h2&gt;
+&lt;p&gt;To keep the host easily accessible after setup, we’re going to use an Elastic IP.
+You can save the connection information in your RDP client and won’t have to jump
+into the AWS console to find the IP.&lt;/p&gt;
+&lt;p&gt;The security group is only going to allow access to your WAN IP. I have a cronjob
+that updates the stack periodically with our home IP. The cronjob looks like this
+and runs hourly:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;cron&quot;&gt;&lt;pre class=&quot;language-cron&quot;&gt;&lt;code class=&quot;language-cron&quot;&gt;0 * * * * /usr/local/bin/aws cloudformation deploy --stack-name windows-box --template-file ~user/cloudformation/cf-auto-windows-box.yml --parameter-overrides &amp;quot;ClientIP=$(curl ifconfig.co)&amp;quot; --no-fail-on-empty-changeset&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;You’ll have to fill in your own VPC and subnet IDs for this stack - the host needs
+internet access. Using this
+&lt;a href=&quot;https://github.com/terrbear/terrbear.github.io/blob/develop/content/blog/on-demand-windows-machine/resources/cf-auto-windows-box.yml&quot;&gt;CloudFormation template&lt;/a&gt;,
+you can create the stack through the AWS console or just command-line it:&lt;/p&gt;
+&lt;blockquote&gt;
+&lt;p&gt;&lt;i class=&quot;fas fa-lightbulb&quot;&gt;&lt;/i&gt; &lt;a href=&quot;https://ifconfig.co&quot;&gt;ifconfig.co&lt;/a&gt; is handy for grabbing your WAN IP&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;shell&quot;&gt;&lt;pre class=&quot;language-shell&quot;&gt;&lt;code class=&quot;language-shell&quot;&gt;aws cloudformation deploy &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+  --stack-name windows-box &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+  --template-file cf-auto-windows-box.yml &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+  --capabilities CAPABILITY_NAMED_IAM &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+  --parameter-overrides &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+    &lt;span class=&quot;token string&quot;&gt;&quot;KeyPair=YOUR-KEY-NAME&quot;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+    &lt;span class=&quot;token string&quot;&gt;&quot;VPC=YOUR-VPC-ID&quot;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+    &lt;span class=&quot;token string&quot;&gt;&quot;Subnet=YOUR-SUBNET-ID&quot;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;\&lt;/span&gt;
+    &lt;span class=&quot;token string&quot;&gt;&quot;ClientIP=&lt;span class=&quot;token variable&quot;&gt;&lt;span class=&quot;token variable&quot;&gt;$(&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;curl&lt;/span&gt; ifconfig.co&lt;span class=&quot;token variable&quot;&gt;)&lt;/span&gt;&lt;/span&gt;&quot;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2&gt;The Lambdas&lt;/h2&gt;
+&lt;p&gt;The template adds two lambdas to your account, &lt;code class=&quot;language-text&quot;&gt;power-switch&lt;/code&gt; and &lt;code class=&quot;language-text&quot;&gt;power-off&lt;/code&gt;. &lt;/p&gt;
+&lt;p&gt;The &lt;code class=&quot;language-text&quot;&gt;power-switch&lt;/code&gt; lambda toggles the state from stopped to running:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;js&quot;&gt;&lt;pre class=&quot;language-js&quot;&gt;&lt;code class=&quot;language-js&quot;&gt;&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; &lt;span class=&quot;token constant&quot;&gt;AWS&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;require&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;aws-sdk&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; instanceId &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; process&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;env&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token constant&quot;&gt;INSTANCE_ID&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; ec2 &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;token class-name&quot;&gt;AWS&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;EC2&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; &lt;span class=&quot;token function-variable function&quot;&gt;checkIfRunning&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;async&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+  &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; response &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;await&lt;/span&gt; ec2
+    &lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;describeInstances&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt; InstanceIds&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;instanceId&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;
+    &lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;promise&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; response&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;Reservations&lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;token number&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;Instances&lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;&lt;span class=&quot;token number&quot;&gt;0&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;State&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;Name &lt;span class=&quot;token operator&quot;&gt;!==&lt;/span&gt; &lt;span class=&quot;token string&quot;&gt;&quot;stopped&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+exports&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function-variable function&quot;&gt;handler&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;async&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+  &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; params &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+    InstanceIds&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;instanceId&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+  &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; running &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;await&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;checkIfRunning&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+  &lt;span class=&quot;token keyword&quot;&gt;if&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;running&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+    &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; ec2&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;stopInstances&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;params&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;promise&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;
+
+  &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; ec2&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;startInstances&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;params&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;promise&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The &lt;code class=&quot;language-text&quot;&gt;power-off&lt;/code&gt; lambda, on the other hand, always turns the machine off:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;js&quot;&gt;&lt;pre class=&quot;language-js&quot;&gt;&lt;code class=&quot;language-js&quot;&gt;&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; &lt;span class=&quot;token constant&quot;&gt;AWS&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token function&quot;&gt;require&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token string&quot;&gt;&quot;aws-sdk&quot;&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; instanceId &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; process&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;env&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token constant&quot;&gt;INSTANCE_ID&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+&lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; ec2 &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token keyword&quot;&gt;new&lt;/span&gt; &lt;span class=&quot;token class-name&quot;&gt;AWS&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;EC2&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+
+exports&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function-variable function&quot;&gt;handler&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt; &lt;span class=&quot;token operator&quot;&gt;=&gt;&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+  &lt;span class=&quot;token keyword&quot;&gt;const&lt;/span&gt; params &lt;span class=&quot;token operator&quot;&gt;=&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;{&lt;/span&gt;
+    InstanceIds&lt;span class=&quot;token operator&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token punctuation&quot;&gt;[&lt;/span&gt;instanceId&lt;span class=&quot;token punctuation&quot;&gt;]&lt;/span&gt;
+  &lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+  &lt;span class=&quot;token keyword&quot;&gt;return&lt;/span&gt; ec2&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;stopInstances&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;params&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;.&lt;/span&gt;&lt;span class=&quot;token function&quot;&gt;promise&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;(&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;)&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;
+&lt;span class=&quot;token punctuation&quot;&gt;}&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;;&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The lambdas will only be allowed to describe your EC2 instances and turn on/off the instance created as part of the stack.&lt;/p&gt;
+&lt;h2&gt;Flipping the switch&lt;/h2&gt;
+&lt;p&gt;Thanks to iOS’s Shortcuts allowing SSH commands, you can actually make a nifty power switch from your phone:&lt;/p&gt;
+&lt;p&gt;&lt;span
+      class=&quot;gatsby-resp-image-wrapper&quot;
+      style=&quot;position: relative; display: block; margin-left: auto; margin-right: auto;  max-width: 296px;&quot;
+    &gt;
+      &lt;a
+    class=&quot;gatsby-resp-image-link&quot;
+    href=&quot;/static/130e0fe0f0511caddc9621c90db7fd13/b1a44/ios-switch.png&quot;
+    style=&quot;display: block&quot;
+    target=&quot;_blank&quot;
+    rel=&quot;noopener&quot;
+  &gt;
+    &lt;span
+    class=&quot;gatsby-resp-image-background-image&quot;
+    style=&quot;padding-bottom: 216.2162162162162%; position: relative; bottom: 0; left: 0; background-image: url(&apos;data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABQAAAArCAIAAAD3xz8iAAAACXBIWXMAAAsSAAALEgHS3X78AAAEsUlEQVRIx4VWWXPbNhDWH2t+UP9IzxnH40md1Gk7zUz7lJk+9bXH2FZtOZZqyzpIihQPkQQJHiBFiFT70g8A5cqy7KyX8ALYxS4We6gTksS0nH7/djqdLRYkDGkQxE8gddzAthd3d9PBYEhI0sFnGPOzswvMPS98Rhhbmm7qunl50fv9tz/iOOvI1YQmLI5znK00YPT3yUMTLJ15hR0sfT+GMI2iDKf6fqTUYhUcWMSKOiWKUigAJwmp59M/b5LrSbzwaQd7k4lhWi7MgNkkSilljuPDBSAISWER7uW6AQ5y3ZAEZGQl3XFCwriD1YODw8PDo+Pjbz//4qujo2+Oj9+8e/fTq1fHJyffYf3165P3738B8fbtD19+/fLHN0effj9/cVjDNqEZenTdGo/14XCiRkyxqKawy7Lc0UiDLfCzNtVvddKb4iIxvE1d18uyvChKYFkuq4pjZEVZVSvQclphXC4556slVsqiKjISiaeKP3y4xhOlmYBltfwH8C++Nd8LK5xSRTGlNO1Qmk1gmWHouj6dTkFoun57e6tpGn8CKpywWrXChJCFBNuxPc/zfd/BjYOAPw11XQvhJMlw0ZyxUt5svV43TaPGar9acFVgboUZY1RCmmZiewN7FQJgcyuMjyI601St8mchTVOpI2UFazVbljWbzfhHBIWT5vM5HAlm13NpkgmHLSW099ly6Y7l2L03G1utt3GYaZoftVnJgw0+gvJWuG5qLg+rpML/NctZtTOV0L4z7qzCY9XKV88/bxzHNzc3tm2naS6ElcH1BnbufH9zRYABDmrvjAOMmXF52Rv8Pej3+8PhcJsboeJ5i7Oz8273r+HdyJrPu93u9XU/EQBvJyIwZDJVTEK1FUkgiqJIEAZQkmfLkrE8y7MUmaXujEJhIBNwbRXxj58XpjZNnRb12Kv1oDbC2k9rnCjuXCBcEpSoAPnIH3h7Q1e8lt5MGM9LnhVVXm687Tg2lItMeAJWvEryygy4G3Mv5rOAh+mq1RxFEdKweQioBmqEzcgxXq+jfJ0UwAbyNF8lSjOeDuEN5bg23lzRcDteYTQaIc9Ny5pMxvbcnBma48xxVNO0xSDFRu/qCtx4kMFg0OthdoUjUJUiFN48h6uhIBEpJfz+oJLg0fEepRwVjUK4cXKzqltCBFDTRhEWN7EtE2UH2jB+5Pxqu4bhziox9smv9q4Lo5paRBiJKMxkbBdzVvAlA+Zszy4ABb+Dboa2vIPegqAnDbQICMJ7xACEYCcIqWiOGww3ox/QTw74i5c83GKQbXTDHNDOpic/+AUg+i6JP/uVAWMSb/FsMwuz4wcoN0BgZDQC3jf6+9EPWmY8FTIz3YsxFQgCoQG2bUSFx4hikOq6oWmoRCiEumHMBH1PoKVONcuaoySgmWIE2rYzHk+Q1kIYE2ybJuoEapMDYiZpLCp0HNdH70L2+BgCyKvg7TD5auUGtuntRYSCSHwREa0A/gvhkBAcI15fPD2BD5AM2Rag9EQJO9fLOC2qkoH++aJEjxPCYFXnAcF63yubteiXqmniBwFJWCaUgp+RpGg1K2PUiKxCSp+enqJKnuNPAqai11dLabTQIq1m/wEs1C/cDwwUdAAAAABJRU5ErkJggg==&apos;); background-size: cover; display: block;&quot;
+  &gt;&lt;/span&gt;
+  &lt;img
+        class=&quot;gatsby-resp-image-image&quot;
+        alt=&quot;iOS Shortcut&quot;
+        title=&quot;iOS Shortcut&quot;
+        src=&quot;/static/130e0fe0f0511caddc9621c90db7fd13/b1a44/ios-switch.png&quot;
+        srcset=&quot;/static/130e0fe0f0511caddc9621c90db7fd13/12f09/ios-switch.png 148w,
+/static/130e0fe0f0511caddc9621c90db7fd13/e4a3f/ios-switch.png 295w,
+/static/130e0fe0f0511caddc9621c90db7fd13/b1a44/ios-switch.png 296w&quot;
+        sizes=&quot;(max-width: 296px) 100vw, 296px&quot;
+        style=&quot;width:100%;height:100%;margin:0;vertical-align:middle;position:absolute;top:0;left:0;&quot;
+        loading=&quot;lazy&quot;
+      /&gt;
+  &lt;/a&gt;
+    &lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;If you end up going the iOS shortcut route, you can skip the cronjob and issue the CloudFormation update
+with your current IP as needed. &lt;/p&gt;
+&lt;p&gt;Unfortunately, there isn’t a way to get the IP address of an IoT button when it’s pressed, so I’m still
+using the cronjob. &lt;/p&gt;
+&lt;p&gt;If you just want to test this out without using the AWS console, you can invoke the lambda like so:&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight&quot; data-language=&quot;shell&quot;&gt;&lt;pre class=&quot;language-shell&quot;&gt;&lt;code class=&quot;language-shell&quot;&gt;aws lambda invoke --function-name power-switch /dev/null&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2&gt;Cost Control&lt;/h2&gt;
+&lt;p&gt;The &lt;code class=&quot;language-text&quot;&gt;power-off&lt;/code&gt; lambda is used to prevent the machine from running too long. The stack
+will schedule it to run once per day. You’ll want to change the cron expression to match
+your timezone (in Pacific/Auckland I’ve got it set to 1am-ish).&lt;/p&gt;
+&lt;div class=&quot;gatsby-highlight has-highlighted-lines&quot; data-language=&quot;yml&quot;&gt;&lt;pre class=&quot;language-yml&quot;&gt;&lt;code class=&quot;language-yml&quot;&gt;&lt;span class=&quot;token key atrule&quot;&gt;PowerOffNightlyRule&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;
+  &lt;span class=&quot;token key atrule&quot;&gt;Type&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; AWS&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;Events&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;Rule
+  &lt;span class=&quot;token key atrule&quot;&gt;Properties&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;
+    &lt;span class=&quot;token key atrule&quot;&gt;Name&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; power&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;off&lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt;nightly
+    &lt;span class=&quot;token key atrule&quot;&gt;Description&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; powers off the instance daily
+&lt;span class=&quot;gatsby-highlight-code-line&quot;&gt;    &lt;span class=&quot;token key atrule&quot;&gt;ScheduleExpression&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; cron(0 13 * * &lt;span class=&quot;token punctuation&quot;&gt;?&lt;/span&gt; &lt;span class=&quot;token important&quot;&gt;*)&lt;/span&gt;&lt;/span&gt;    &lt;span class=&quot;token key atrule&quot;&gt;State&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; ENABLED
+    &lt;span class=&quot;token key atrule&quot;&gt;Targets&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt;
+      &lt;span class=&quot;token punctuation&quot;&gt;-&lt;/span&gt; &lt;span class=&quot;token key atrule&quot;&gt;Arn&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; &lt;span class=&quot;token tag&quot;&gt;!GetAtt&lt;/span&gt; PowerOff.Arn
+        &lt;span class=&quot;token key atrule&quot;&gt;Id&lt;/span&gt;&lt;span class=&quot;token punctuation&quot;&gt;:&lt;/span&gt; PowerOffNightly&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;</content:encoded></item><item><title><![CDATA[Opting in to Preview Builds with AWS ALBs]]></title><description><![CDATA[AWS’s application load balancers 
 support routing traffic to different locations based on 
 HTTP request characteristics. 
 This is helpful if…]]></description><link>https://terrbear.org/opt-in-previews-with-albs/</link><guid isPermaLink="false">https://terrbear.org/opt-in-previews-with-albs/</guid><pubDate>Mon, 27 Apr 2020 00:00:00 GMT</pubDate><content:encoded>&lt;p&gt;AWS’s &lt;a href=&quot;https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html&quot;&gt;application load balancers&lt;/a&gt;
@@ -17,7 +147,7 @@ users into your new features and easily fall back to the old app if something is
 &lt;li&gt;Then the browser refreshes (&lt;code class=&quot;language-text&quot;&gt;window.location.reload()&lt;/code&gt;), re-requesting mysite.com. The ALB sees the preview cookie, and directs traffic to the new service.&lt;/li&gt;
 &lt;li&gt;We’ll support opt-out by allowing the new service to delete the cookie.&lt;/li&gt;
 &lt;/ol&gt;
-&lt;h2&gt;Step 1: Make an old service that allows opt-in&lt;/h2&gt;
+&lt;h2&gt;Step 1: Make a service that allows opt-in&lt;/h2&gt;
 &lt;blockquote&gt;
 &lt;p&gt;&lt;i class=&quot;fa fa-github&quot;&gt;&lt;/i&gt; All the resources for this post can be found on &lt;a href=&quot;https://github.com/terrbear/terrbear.github.io/tree/develop/content/blog/opt-in-previews-with-albs&quot;&gt;GitHub&lt;/a&gt;.&lt;/p&gt;
 &lt;/blockquote&gt;
